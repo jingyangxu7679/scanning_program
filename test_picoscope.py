@@ -14,32 +14,75 @@ from datetime import datetime, timezone
 from picosdk.functions import adc2mV, assert_pico2000_ok
 
 
-def save_recording_hdf5(path, time, channels, channel_names=None, meta=None, compression="gzip", compression_opts=4):
+def _as_hdf5_dataset_array(values, name):
+    """Convert incoming data to an HDF5-compatible ndarray."""
+    arr = np.asarray(values)
+    if arr.dtype.kind == "O":
+        # Try numeric conversion first for waveform data.
+        try:
+            arr = np.asarray(values, dtype=np.float64)
+        except (TypeError, ValueError):
+            # Fall back to UTF-8 strings for non-numeric object arrays.
+            str_dtype = h5py.string_dtype(encoding="utf-8")
+            arr = np.asarray([str(v) for v in np.ravel(arr)], dtype=str_dtype).reshape(arr.shape)
+    return arr
+
+
+def _as_hdf5_attr_value(value):
+    """Convert attribute values to HDF5-compatible scalar/array types."""
+    if isinstance(value, (str, bytes, int, float, np.integer, np.floating, np.bool_)):
+        return value
+
+    if isinstance(value, np.ndarray):
+        arr = value
+    else:
+        arr = np.asarray(value)
+
+    if arr.ndim == 0:
+        scalar = arr.item()
+        if isinstance(scalar, (str, bytes, int, float, np.integer, np.floating, np.bool_)):
+            return scalar
+        return str(scalar)
+
+    if arr.dtype.kind == "O":
+        str_dtype = h5py.string_dtype(encoding="utf-8")
+        return np.asarray([str(v) for v in np.ravel(arr)], dtype=str_dtype).reshape(arr.shape)
+
+    return arr
+
+
+def save_recording_hdf5(path, time, channels, channel_names=None, meta=None, compression="gzip", compression_opts=4, x_pos=None, y_pos=None):
     """Save time and channel data to an HDF5 file.
 
     - `channels` may be a dict of name->array or a list/2D-array.
     - `meta` is an optional dict stored as file attributes.
+    - `x_pos` and `y_pos` are optional positions to be stored as attributes.
     """
     with h5py.File(path, "w") as f:
-        f.create_dataset("time", data=np.asarray(time), compression=compression, compression_opts=compression_opts)
+        time_arr = _as_hdf5_dataset_array(time, "time")
+        f.create_dataset("time", data=time_arr, compression=compression, compression_opts=compression_opts)
 
         if isinstance(channels, dict):
             for name, arr in channels.items():
-                f.create_dataset(f"channels/{name}", data=np.asarray(arr), compression=compression, compression_opts=compression_opts)
+                ch_arr = _as_hdf5_dataset_array(arr, f"channels/{name}")
+                f.create_dataset(f"channels/{name}", data=ch_arr, compression=compression, compression_opts=compression_opts)
         else:
             for i, arr in enumerate(channels):
                 name = channel_names[i] if channel_names and i < len(channel_names) else f"ch{i+1}"
-                f.create_dataset(f"channels/{name}", data=np.asarray(arr), compression=compression, compression_opts=compression_opts)
+                ch_arr = _as_hdf5_dataset_array(arr, f"channels/{name}")
+                f.create_dataset(f"channels/{name}", data=ch_arr, compression=compression, compression_opts=compression_opts)
 
         meta = dict(meta or {})
         # use timezone-aware UTC timestamp to avoid deprecation warnings
         meta.setdefault("saved_at", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
         for k, v in meta.items():
-            try:
-                f.attrs[k] = v
-            except TypeError:
-                f.attrs[k] = str(v)
-def picoscope_block_mode_run():
+            f.attrs[k] = _as_hdf5_attr_value(v)
+        if x_pos is not None:
+            f.attrs["x_pos"] = _as_hdf5_attr_value(x_pos)
+        if y_pos is not None:
+            f.attrs["y_pos"] = _as_hdf5_attr_value(y_pos)
+
+def picoscope_block_mode_run(x_pos, y_pos):
     # Create status ready for use
     status = {}
 
@@ -160,7 +203,7 @@ def picoscope_block_mode_run():
     save_dir = os.path.join(os.path.expanduser("~"), "Desktop", "test_data")
     os.makedirs(save_dir, exist_ok=True)
     filepath = os.path.join(save_dir, filename)
-    save_recording_hdf5(filepath, time, channels, meta=meta)
+    save_recording_hdf5(filepath, time, channels, meta=meta, x_pos=x_pos, y_pos=y_pos)
     print(f"Saved recording to {filepath}")
 
     # Stop the scope

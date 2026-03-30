@@ -95,15 +95,17 @@ def main():
         print("Homing Completed")
         step_size = 5
         time.sleep(2)
-        for N in range(5):
+        for N in range(2):
             print("Moving...")
             channel.MoveTo(Decimal(step_size*N), 60000)
             print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
-            for N in range (5):
+            for N in range (2):
                 channel_2.MoveTo(Decimal(step_size*N), 60000)
                 print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
                 time.sleep(1)
-                test_picoscope.picoscope_block_mode_run()  # run the picoscope example to show that the two can be used together without issue
+                x_pos = channel.DevicePosition
+                y_pos = channel_2.DevicePosition
+                test_picoscope.picoscope_block_mode_run(x_pos, y_pos)  # run the picoscope example to show that the two can be used together without issue
 
                 N=N+1
             #test_picoscope.picoscope_block_mode_run()  # run the picoscope example to show that the two can be used together without issue

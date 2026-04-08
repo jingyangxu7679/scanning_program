@@ -42,11 +42,9 @@ def main():
             channel.WaitForSettingsInitialized(10000)  # 10 second timeout
             assert channel.IsSettingsInitialized() is True
 
-        # Start polling and enable
+        # Start polling
         channel.StartPolling(250)  # 250ms polling rate
         time.sleep(0.25)
-        channel.EnableDevice()
-        time.sleep(0.25)  # Wait for device to enable
 
         # Get Device Information and display description
         device_info = channel.GetDeviceInfo()
@@ -64,7 +62,12 @@ def main():
 
         channel.SetSettings(chan_settings, True, False)
 
-        # Get parameters related to homing/zeroing/other
+
+        channel.EnableDevice()
+        time.sleep(15)
+        # Poll until the channel actually reports enabled (fixed sleep is unreliable)
+        timeout = 15  # seconds
+        start = time.time()
 
         # Home or Zero the device (if a motor/piezo)
         print("Homing Motor")
@@ -74,7 +77,6 @@ def main():
         step_size = 5
         time.sleep(2)
         for N in range(5):
-
             print("Moving...")
             channel.MoveTo(Decimal(step_size*N), 60000)
             print(f"Position = {channel.DevicePosition}")
@@ -87,8 +89,8 @@ def main():
         device.Disconnect()
 
     except Exception as e:
-        # this can be bad practice: It sometimes obscures the error source
         print(e)
+        raise
 
     # Comment this line for the real device
     #SimulationManager.Instance.UninitializeSimulations()

@@ -45,15 +45,11 @@ def main():
         if not channel_2.IsSettingsInitialized():
             channel_2.WaitForSettingsInitialized(10000)  # 10 second timeout
             assert channel_2.IsSettingsInitialized() is True
-        # Start polling and enable
+        # Start polling
         channel.StartPolling(250)  # 250ms polling rate
         time.sleep(0.25)
-        channel.EnableDevice()
-        time.sleep(0.25)  # Wait for device to enable
         channel_2.StartPolling(250)  # 250ms polling rate
         time.sleep(0.25)    
-        channel_2.EnableDevice()
-        time.sleep(0.25)  # Wait for device to enable
         
         # Get Device Information and display description
         device_info = channel.GetDeviceInfo()
@@ -80,6 +76,23 @@ def main():
         channel_config_2.DeviceSettingsName = 'HDR50/M'
         channel_config_2.UpdateCurrentConfiguration()
         channel_2.SetSettings(chan_settings_2, True, False)
+
+        # Enable channels after settings are applied. SetSettings can clear enable state.
+        channel.EnableDevice()
+        channel_2.EnableDevice()
+
+        timeout = 15  # seconds
+        start = time.time()
+        while not channel.Status.IsEnabled:
+            if time.time() - start > timeout:
+                raise RuntimeError("Timed out waiting for channel 1 to enable")
+            time.sleep(0.1)
+
+        start = time.time()
+        while not channel_2.Status.IsEnabled:
+            if time.time() - start > timeout:
+                raise RuntimeError("Timed out waiting for channel 2 to enable")
+            time.sleep(0.1)
 
 
         # Home or Zero the device (if a motor/piezo)
@@ -110,8 +123,8 @@ def main():
         device.Disconnect()
 
     except Exception as e:
-        # this can be bad practice: It sometimes obscures the error source
         print(e)
+        raise
 
     # Comment this line for the real device
     #SimulationManager.Instance.UninitializeSimulations()

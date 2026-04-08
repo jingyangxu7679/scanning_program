@@ -10,7 +10,7 @@ motor = None
 MOTOR_IMPORT_ERROR = None
 
 
-MOTOR_CHANNELS = [1, 2]
+MOTOR_CHANNELS = [1, 2, 3]
 
 
 class MotorPanel(ttk.LabelFrame):
@@ -140,6 +140,117 @@ class MotorPanel(ttk.LabelFrame):
 		threading.Thread(target=worker, daemon=True).start()
 
 
+class ScanPanel(ttk.LabelFrame):
+	def __init__(self, parent):
+		super().__init__(parent, text="2D/3D Scan", padding=10)
+
+		self.status_var = tk.StringVar(value="Scan status: idle")
+		self.x_position_var = tk.StringVar(value="1")
+		self.y_position_var = tk.StringVar(value="1")
+		self.z_position_var = tk.StringVar(value="1")
+		self.x_step_size_var = tk.StringVar(value="1")
+		self.y_step_size_var = tk.StringVar(value="1")
+		self.z_step_size_var = tk.StringVar(value="1")
+
+		self._build_widgets()
+
+	def _build_widgets(self):
+		for i in range(6):
+			self.columnconfigure(i, weight=1)
+
+		ttk.Label(self, textvariable=self.status_var, wraplength=900, justify="left").grid(
+			row=0, column=0, columnspan=6, sticky="ew", pady=(0, 8)
+		)
+
+		ttk.Label(self, text="X Position").grid(row=1, column=0, sticky="w")
+		x_pos_frame = ttk.Frame(self)
+		x_pos_frame.grid(row=2, column=0, sticky="ew", padx=(0, 8))
+		x_pos_frame.columnconfigure(0, weight=1)
+		ttk.Entry(x_pos_frame, textvariable=self.x_position_var).grid(row=0, column=0, sticky="ew")
+		ttk.Label(x_pos_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+
+		ttk.Label(self, text="Y Position").grid(row=1, column=1, sticky="w")
+		y_pos_frame = ttk.Frame(self)
+		y_pos_frame.grid(row=2, column=1, sticky="ew", padx=(0, 8))
+		y_pos_frame.columnconfigure(0, weight=1)
+		ttk.Entry(y_pos_frame, textvariable=self.y_position_var).grid(row=0, column=0, sticky="ew")
+		ttk.Label(y_pos_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+
+		ttk.Label(self, text="Z Position").grid(row=1, column=2, sticky="w")
+		z_pos_frame = ttk.Frame(self)
+		z_pos_frame.grid(row=2, column=2, sticky="ew", padx=(0, 8))
+		z_pos_frame.columnconfigure(0, weight=1)
+		ttk.Entry(z_pos_frame, textvariable=self.z_position_var).grid(row=0, column=0, sticky="ew")
+		ttk.Label(z_pos_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+
+		ttk.Label(self, text="X Step Size").grid(row=1, column=3, sticky="w")
+		x_step_frame = ttk.Frame(self)
+		x_step_frame.grid(row=2, column=3, sticky="ew", padx=(0, 8))
+		x_step_frame.columnconfigure(0, weight=1)
+		tk.Entry(x_step_frame, textvariable=self.x_step_size_var).grid(row=0, column=0, sticky="ew")
+		ttk.Label(x_step_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+
+		ttk.Label(self, text="Y Step Size").grid(row=1, column=4, sticky="w")
+		y_step_frame = ttk.Frame(self)
+		y_step_frame.grid(row=2, column=4, sticky="ew", padx=(0, 8))
+		y_step_frame.columnconfigure(0, weight=1)
+		tk.Entry(y_step_frame, textvariable=self.y_step_size_var).grid(row=0, column=0, sticky="ew")
+		ttk.Label(y_step_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+
+		ttk.Label(self, text="Z Step Size").grid(row=1, column=5, sticky="w")
+		z_step_frame = ttk.Frame(self)
+		z_step_frame.grid(row=2, column=5, sticky="ew")
+		z_step_frame.columnconfigure(0, weight=1)
+		tk.Entry(z_step_frame, textvariable=self.z_step_size_var).grid(row=0, column=0, sticky="ew")
+		ttk.Label(z_step_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+
+		ttk.Button(self, text="Start Scan", command=self.start_scan).grid(
+			row=3, column=0, columnspan=6, sticky="ew", pady=(10, 0)
+		)
+
+	def _set_status(self, msg):
+		self.status_var.set(msg)
+
+	def start_scan(self):
+		if motor is None:
+			self._set_status(f"Scan status: motor library unavailable - {MOTOR_IMPORT_ERROR}")
+			return
+
+		try:
+			x_position = float(self.x_position_var.get().strip())
+			y_position = float(self.y_position_var.get().strip())
+			z_position = float(self.z_position_var.get().strip())
+			x_step_size = float(self.x_step_size_var.get().strip())
+			y_step_size = float(self.y_step_size_var.get().strip())
+			z_step_size = float(self.z_step_size_var.get().strip())
+		except ValueError:
+			self._set_status("Scan status: invalid input. Use numbers for positions and step sizes.")
+			return
+
+		if x_position < 0 or y_position < 0 or z_position < 0:
+			self._set_status("Scan status: x_position, y_position, and z_position must be >= 0.")
+			return
+
+		if x_step_size <= 0 or y_step_size <= 0 or z_step_size <= 0:
+			self._set_status("Scan status: x_step_size, y_step_size, and z_step_size must be > 0.")
+			return
+
+		self._set_status(
+			f"Scan status: running x={x_position}, y={y_position}, z={z_position}, "
+			f"x_step={x_step_size}, y_step={y_step_size}, z_step={z_step_size}..."
+		)
+
+		def worker():
+			try:
+				motor.scan(x_position, y_position, z_position, x_step_size, y_step_size, z_step_size)
+				msg = "Scan status: completed"
+			except Exception as exc:
+				msg = f"Scan status: error - {exc}"
+			self.after(0, lambda: self._set_status(msg))
+
+		threading.Thread(target=worker, daemon=True).start()
+
+
 def _load_motor_module():
 	global motor
 	global MOTOR_IMPORT_ERROR
@@ -157,7 +268,10 @@ def _load_motor_module():
 def build_gui():
 	root = tk.Tk()
 	root.title("Motor Control")
-	root.geometry("950x420")
+	num_channels = len(MOTOR_CHANNELS)
+	window_width = max(950, 360 * num_channels)
+	root.geometry(f"{window_width}x560")
+	root.minsize(window_width, 560)
 
 	container = ttk.Frame(root, padding=12)
 	container.pack(fill="both", expand=True)
@@ -177,12 +291,12 @@ def build_gui():
 			f"Details: {MOTOR_IMPORT_ERROR}"
 		)
 	ttk.Label(container, text=startup_msg, wraplength=900, justify="left").grid(
-		row=0, column=0, columnspan=3, sticky="ew", pady=(0, 8)
+		row=0, column=0, columnspan=num_channels, sticky="ew", pady=(0, 8)
 	)
 	if not connection_ok:
 		messagebox.showwarning("Motor Connection", startup_msg)
 
-	for i in range(3):
+	for i in range(num_channels):
 		container.columnconfigure(i, weight=1)
 
 	panels = []
@@ -191,10 +305,14 @@ def build_gui():
 		panel.grid(row=1, column=idx, sticky="nsew", padx=6, pady=6)
 		panels.append(panel)
 
+	scan_panel = ScanPanel(container)
+	scan_panel.grid(row=2, column=0, columnspan=num_channels, sticky="ew", padx=6, pady=(4, 6))
+
 	for panel in panels:
 		panel.refresh_status()
 
 	return root
+#next step is to configure the motors to move in loops with given step size and parameters
 
 
 if __name__ == "__main__":

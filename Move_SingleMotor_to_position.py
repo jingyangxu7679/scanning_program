@@ -35,7 +35,7 @@ def main():
         time.sleep(0.25)  # wait statements are important to allow settings to be sent to the device
 
         # For benchtop devices, get the channel
-        channel = device.GetChannel(1)
+        channel = device.GetChannel(2)
 
         # Ensure that the device settings have been initialized
         if not channel.IsSettingsInitialized():
@@ -71,11 +71,10 @@ def main():
         channel.Home(60000)
         print("Homing Completed")
 
-        step_size = 20  #should correspond to 0.5 mm for the stage
+        step_size = 0.2  #should correspond to *0.1 mm for the stage
         time.sleep(2)
         print("Moving...")
         channel.MoveTo(Decimal(step_size), 60000)
-        channel.MoveTo(Decimal(10), 60000)
         print(f"Position = {channel.DevicePosition}")
         time.sleep(2)
         #Home after moving 

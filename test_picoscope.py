@@ -101,7 +101,7 @@ def picoscope_block_mode_run(x_pos, y_pos):
     # coupling type = PS2000_DC = 1
     # range = PS2000_2V = 7
     # analogue offset = 0 V
-    chARange = 7
+    chARange = 2
     status["setChA"] = ps.ps2000_set_channel(chandle, 0, 1, 1, chARange)
     assert_pico2000_ok(status["setChA"])
 
@@ -112,7 +112,7 @@ def picoscope_block_mode_run(x_pos, y_pos):
     # coupling type = PS2000_DC = 1
     # range = PS2000_2V = 7
     # analogue offset = 0 V
-    chBRange = 7
+    chBRange = 2
     status["setChB"] = ps.ps2000_set_channel(chandle, 1, 1, 1, chBRange)
     assert_pico2000_ok(status["setChB"])
 
@@ -200,7 +200,7 @@ def picoscope_block_mode_run(x_pos, y_pos):
     }
     filename = f"picoscope_recording_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.h5"
     # save to Desktop/test_data
-    save_dir = os.path.join(os.path.expanduser("~"), "Desktop", "test_data")
+    save_dir = os.path.join(os.path.expanduser("~"), "Desktop", "test_data_new_1")
     os.makedirs(save_dir, exist_ok=True)
     filepath = os.path.join(save_dir, filename)
     save_recording_hdf5(filepath, time, channels, meta=meta, x_pos=x_pos, y_pos=y_pos)

@@ -8,6 +8,7 @@ from tkinter import messagebox
 
 motor = None
 MOTOR_IMPORT_ERROR = None
+MOTOR_IO_LOCK = threading.Lock()
 
 
 MOTOR_CHANNELS = [1, 2, 3]
@@ -15,7 +16,13 @@ MOTOR_CHANNELS = [1, 2, 3]
 
 class MotorPanel(ttk.LabelFrame):
 	def __init__(self, parent, channel_num):
-		super().__init__(parent, text=f"Motor Channel {channel_num}", padding=10)
+		title_by_channel = {
+			1: "X-axis control(Channel 1)",
+			2: "Y axis control(Channel 2)",
+			3: "Z axis control(Channel 3)",
+		}
+		panel_title = title_by_channel.get(channel_num, f"Motor Channel {channel_num}")
+		super().__init__(parent, text=panel_title, padding=10)
 		self.channel_num = channel_num
 
 		self.status_var = tk.StringVar(value="Status: not queried yet")
@@ -68,7 +75,8 @@ class MotorPanel(ttk.LabelFrame):
 
 	def _query_motor_position(self):
 		# motor_position currently requires a second arg; use 0 as placeholder when querying.
-		return motor.motor_position(self.channel_num, 0)
+		with MOTOR_IO_LOCK:
+			return motor.motor_position(self.channel_num, 0)
 
 	def refresh_status(self):
 		if motor is None:
@@ -79,7 +87,8 @@ class MotorPanel(ttk.LabelFrame):
 
 		def worker():
 			try:
-				info = motor.return_motor_info(self.channel_num)
+				with MOTOR_IO_LOCK:
+					info = motor.return_motor_info(self.channel_num)
 				position = self._query_motor_position()
 				msg = (
 					f"Status: enabled={info.get('is_enabled')} | "
@@ -110,7 +119,8 @@ class MotorPanel(ttk.LabelFrame):
 
 		def worker():
 			try:
-				motor.connect_and_move("", self.channel_num, position)
+				with MOTOR_IO_LOCK:
+					motor.connect_and_move("", self.channel_num, position)
 				final_pos = self._query_motor_position()
 				msg = f"Status: moved to target={position} | reported={final_pos}"
 				self.after(0, lambda: self._set_displayed_position(final_pos))
@@ -129,7 +139,8 @@ class MotorPanel(ttk.LabelFrame):
 
 		def worker():
 			try:
-				motor.home_motor(self.channel_num)
+				with MOTOR_IO_LOCK:
+					motor.home_motor(self.channel_num)
 				position = self._query_motor_position()
 				msg = f"Status: homing complete | reported={position}"
 				self.after(0, lambda: self._set_displayed_position(position))
@@ -242,7 +253,8 @@ class ScanPanel(ttk.LabelFrame):
 
 		def worker():
 			try:
-				motor.scan(x_position, y_position, z_position, x_step_size, y_step_size, z_step_size)
+				with MOTOR_IO_LOCK:
+					motor.scan(x_position, y_position, z_position, x_step_size, y_step_size, z_step_size)
 				msg = "Scan status: completed"
 			except Exception as exc:
 				msg = f"Scan status: error - {exc}"
@@ -278,7 +290,7 @@ def build_gui():
 
 	motor_loaded = _load_motor_module()
 	if motor_loaded:
-		connection_ok = motor.connect_to_all(MOTOR_CHANNELS)
+		connection_ok = motor.connect_to_all_channels(MOTOR_CHANNELS)
 		startup_msg = (
 			f"Startup: connected to serial check for channels {MOTOR_CHANNELS}"
 			if connection_ok
@@ -300,16 +312,55 @@ def build_gui():
 		container.columnconfigure(i, weight=1)
 
 	panels = []
+	panel_by_channel = {}
 	for idx, channel in enumerate(MOTOR_CHANNELS):
 		panel = MotorPanel(container, channel)
 		panel.grid(row=1, column=idx, sticky="nsew", padx=6, pady=6)
 		panels.append(panel)
+		panel_by_channel[channel] = panel
 
 	scan_panel = ScanPanel(container)
 	scan_panel.grid(row=2, column=0, columnspan=num_channels, sticky="ew", padx=6, pady=(4, 6))
 
 	for panel in panels:
 		panel.refresh_status()
+
+	stop_polling_event = threading.Event()
+
+	def position_poller_worker():
+		while not stop_polling_event.is_set():
+			if motor is not None:
+				try:
+					with MOTOR_IO_LOCK:
+						positions = {
+							channel_num: motor.motor_position(channel_num, 0)
+							for channel_num in MOTOR_CHANNELS
+						}
+
+					def apply_positions(data=positions):
+						for channel_num, position in data.items():
+							panel = panel_by_channel.get(channel_num)
+							if panel is not None:
+								panel._set_displayed_position(position)
+
+					root.after(0, apply_positions)
+				except Exception:
+					# Keep poller resilient; operational buttons expose detailed errors.
+					pass
+			stop_polling_event.wait(0.5)
+
+	threading.Thread(target=position_poller_worker, daemon=True).start()
+
+	def on_close():
+		stop_polling_event.set()
+		if motor is not None:
+			try:
+				motor.disconnect_all_channels()
+			except Exception as exc:
+				print(f"Disconnect warning: {exc}")
+		root.destroy()
+
+	root.protocol("WM_DELETE_WINDOW", on_close)
 
 	return root
 #next step is to configure the motors to move in loops with given step size and parameters

@@ -11,52 +11,134 @@ from Thorlabs.MotionControl.Benchtop.StepperMotorCLI import *
 from System import Decimal  # necessary for real world units
 
 SERIAL_NO = os.getenv("THORLABS_BSC_SERIAL", "70536944")
-DEFAULT_CHANNELS = (1, 2)
+DEFAULT_CHANNELS = (1, 2, 3)
+connected_channels = []
+connected_device = None
+connected_channel_map = {}
 
+#connect to all three channels once opening the GUI
+def connect_to_all_channels(channels=None):
+    global connected_device
+    global connected_channels
+    global connected_channel_map
 
-# IP address is not used for Kinesis USB control; kept for compatibility with existing callers.
-def connect_and_move(_ip_addr, channel_num, pos_num):
-    device = None
-    channel = None
     try:
+        if channels is None:
+            channels = DEFAULT_CHANNELS
+
+        requested_channels = [int(ch) for ch in channels]
+
+        # Reuse an existing connection if all requested channels are already available.
+        if connected_device is not None and all(ch in connected_channel_map for ch in requested_channels):
+            return True
+
+        # Reset partially-open state before reconnecting.
+        disconnect_all_channels()
+
         DeviceManagerCLI.BuildDeviceList()
 
         device = BenchtopStepperMotor.CreateBenchtopStepperMotor(SERIAL_NO)
         device.Connect(SERIAL_NO)
         time.sleep(0.25)
 
-        channel = device.GetChannel(channel_num)
+        local_channels = []
+        local_channel_map = {}
 
-        if not channel.IsSettingsInitialized():
-            channel.WaitForSettingsInitialized(10000)
-            assert channel.IsSettingsInitialized() is True
+        for channel_num in requested_channels:
+            channel = device.GetChannel(int(channel_num))
 
-        channel.StartPolling(250)
-        time.sleep(0.25)
-        channel.EnableDevice()
-        time.sleep(0.25)
+            if not channel.IsSettingsInitialized():
+                channel.WaitForSettingsInitialized(10000)
+                assert channel.IsSettingsInitialized() is True
 
-        device_info = channel.GetDeviceInfo()
-        print(device_info.Description)
+            channel.StartPolling(250)
+            time.sleep(0.25)
+            channel.EnableDevice()
+            time.sleep(0.25)
 
-        channel_config = channel.LoadMotorConfiguration(channel.DeviceID)
-        chan_settings = channel.MotorDeviceSettings
+            device_info = channel.GetDeviceInfo()
+            print(device_info.Description)
 
-        channel.GetSettings(chan_settings)
+            channel_config = channel.LoadMotorConfiguration(channel.DeviceID)
+            chan_settings = channel.MotorDeviceSettings
 
-        channel_config.DeviceSettingsName = "HDR50/M"
-        channel_config.UpdateCurrentConfiguration()
+            channel.GetSettings(chan_settings)
 
-        channel.SetSettings(chan_settings, True, False)
+            channel_config.DeviceSettingsName = "HDR50/M"
+            channel_config.UpdateCurrentConfiguration()
+
+            channel.SetSettings(chan_settings, True, False)
+
+            local_channels.append(channel)
+            local_channel_map[int(channel_num)] = channel
+
+        connected_device = device
+        connected_channels = local_channels
+        connected_channel_map = local_channel_map
+
+        return True
+
+    except Exception as e:
+        disconnect_all_channels()
+        print(e)
+        return False
+
+#need to home all motors before disconnecting to ensure they are in a known state when the next connection is made
+def disconnect_all_channels():
+    global connected_device
+    global connected_channels
+    global connected_channel_map
+    N=1
+    for channel in connected_channels:
+        try:
+            home_motor(N)
+            channel.StopPolling()
+            N=N+1
+        except Exception:
+            pass
+
+    if connected_device is not None:
+        try:
+            connected_device.Disconnect()
+        except Exception:
+            pass
+
+    connected_device = None
+    connected_channels = []
+    connected_channel_map = {}
+
+
+def _get_connected_channel(channel_num):
+    if connected_device is None:
+        ok = connect_to_all_channels()
+        if not ok:
+            raise RuntimeError("Unable to connect to motor controller")
+
+    channel = connected_channel_map.get(int(channel_num))
+    if channel is None:
+        ok = connect_to_all_channels((1, 2, 3))
+        if not ok:
+            raise RuntimeError(f"Unable to connect channel {channel_num}")
+        channel = connected_channel_map.get(int(channel_num))
+
+    if channel is None:
+        raise RuntimeError(f"Channel {channel_num} is not connected")
+
+    return channel
+
+# IP address is not used for Kinesis USB control; kept for compatibility with existing callers.
+def single_move(_ip_addr, channel_num, pos_num):
+    try:
+        channel_in = _get_connected_channel(channel_num)
 
         print("Homing Motor")
-        channel.Home(60000)
+        channel_in.Home(60000)
         print("Homing Completed")
 
         step_size = float(pos_num)
         time.sleep(2)
-        channel.MoveTo(Decimal(step_size), 60000)
-        final_position = str(channel.DevicePosition)
+        channel_in.MoveTo(Decimal(step_size), 60000)
+        final_position = str(channel_in.DevicePosition)
         print(f"Position = {final_position}")
         time.sleep(2)
 
@@ -68,94 +150,29 @@ def connect_and_move(_ip_addr, channel_num, pos_num):
 
     except Exception as e:
         raise RuntimeError(f"Move failed on channel {channel_num}: {e}") from e
-    finally:
-        if channel is not None:
-            try:
-                channel.StopPolling()
-            except Exception:
-                pass
-        if device is not None:
-            try:
-                device.Disconnect()
-            except Exception:
-                pass
+
+
+def connect_and_move(_ip_addr, channel_num, pos_num):
+    return single_move(_ip_addr, channel_num, pos_num)
 
 
 def home_motor(channel_num):
-    device = None
-    channel = None
     try:
-        DeviceManagerCLI.BuildDeviceList()
-
-        device = BenchtopStepperMotor.CreateBenchtopStepperMotor(SERIAL_NO)
-        device.Connect(SERIAL_NO)
-        time.sleep(0.25)
-
-        channel = device.GetChannel(channel_num)
-
-        if not channel.IsSettingsInitialized():
-            channel.WaitForSettingsInitialized(10000)
-            assert channel.IsSettingsInitialized() is True
-
-        channel.StartPolling(250)
-        time.sleep(0.25)
-        channel.EnableDevice()
-        time.sleep(0.25)
-
-        device_info = channel.GetDeviceInfo()
-        print(device_info.Description)
-
-        channel_config = channel.LoadMotorConfiguration(channel.DeviceID)
-        chan_settings = channel.MotorDeviceSettings
-
-        channel.GetSettings(chan_settings)
-
-        channel_config.DeviceSettingsName = "HDR50/M"
-        channel_config.UpdateCurrentConfiguration()
-
-        channel.SetSettings(chan_settings, True, False)
+        channel_in = _get_connected_channel(channel_num)
 
         print("Homing Motor")
-        channel.Home(60000)
+        channel_in.Home(60000)
         print("Homing Completed")
 
         return True
 
     except Exception as e:
         raise RuntimeError(f"Home failed on channel {channel_num}: {e}") from e
-    finally:
-        if channel is not None:
-            try:
-                channel.StopPolling()
-            except Exception:
-                pass
-        if device is not None:
-            try:
-                device.Disconnect()
-            except Exception:
-                pass
 
 
 def return_motor_info(channel_num):
-    device = None
-    channel = None
     try:
-        DeviceManagerCLI.BuildDeviceList()
-
-        device = BenchtopStepperMotor.CreateBenchtopStepperMotor(SERIAL_NO)
-        device.Connect(SERIAL_NO)
-        time.sleep(0.25)
-
-        channel = device.GetChannel(channel_num)
-
-        if not channel.IsSettingsInitialized():
-            channel.WaitForSettingsInitialized(10000)
-            assert channel.IsSettingsInitialized() is True
-
-        channel.StartPolling(250)
-        time.sleep(0.25)
-        channel.EnableDevice()
-        time.sleep(0.25)
+        channel = _get_connected_channel(channel_num)
 
         device_info = channel.GetDeviceInfo()
         print(device_info.Description)
@@ -172,191 +189,31 @@ def return_motor_info(channel_num):
 
     except Exception as e:
         raise RuntimeError(f"Status query failed on channel {channel_num}: {e}") from e
-    finally:
-        if channel is not None:
-            try:
-                channel.StopPolling()
-            except Exception:
-                pass
-        if device is not None:
-            try:
-                device.Disconnect()
-            except Exception:
-                pass
 
 
 def connect_to_all(channels=None):
-    connected_channels = []
-    device = None
+    return connect_to_all_channels(channels)
 
-    try:
-        if channels is None:
-            channels = DEFAULT_CHANNELS
 
-        DeviceManagerCLI.BuildDeviceList()
-
-        device = BenchtopStepperMotor.CreateBenchtopStepperMotor(SERIAL_NO)
-        device.Connect(SERIAL_NO)
-        time.sleep(0.25)
-
-        for channel_num in channels:
-            channel = device.GetChannel(int(channel_num))
-
-            if not channel.IsSettingsInitialized():
-                channel.WaitForSettingsInitialized(10000)
-                assert channel.IsSettingsInitialized() is True
-
-            channel.StartPolling(250)
-            time.sleep(0.25)
-            channel.EnableDevice()
-            time.sleep(0.25)
-            connected_channels.append(channel)
-
-        return True
-
-    except Exception as e:
-        print(e)
-        return False
-    finally:
-        for channel in connected_channels:
-            try:
-                channel.StopPolling()
-            except Exception:
-                pass
-        if device is not None:
-            try:
-                device.Disconnect()
-            except Exception:
-                pass
+def connect_to_all_Channels(channels=None):
+    return connect_to_all_channels(channels)
 
 def motor_position(channel_num, pos_num):
-    device = None
-    channel = None
     try:
-        DeviceManagerCLI.BuildDeviceList()
-
-        device = BenchtopStepperMotor.CreateBenchtopStepperMotor(SERIAL_NO)
-        device.Connect(SERIAL_NO)
-        time.sleep(0.25)
-
-        channel = device.GetChannel(channel_num)
-
-        if not channel.IsSettingsInitialized():
-            channel.WaitForSettingsInitialized(10000)
-            assert channel.IsSettingsInitialized() is True
-
-        channel.StartPolling(250)
-        time.sleep(0.25)
-        channel.EnableDevice()
-        time.sleep(0.25)
-
-        device_info = channel.GetDeviceInfo()
-        print(device_info.Description)
-
-        channel_config = channel.LoadMotorConfiguration(channel.DeviceID)
-        chan_settings = channel.MotorDeviceSettings
-
-        channel.GetSettings(chan_settings)
-
-        channel_config.DeviceSettingsName = "HDR50/M"
-        channel_config.UpdateCurrentConfiguration()
-
-        channel.SetSettings(chan_settings, True, False)
+        channel = _get_connected_channel(channel_num)
 
         return channel.DevicePosition
 
     except Exception as e:
         raise RuntimeError(f"Home failed on channel {channel_num}: {e}") from e
-    finally:
-        if channel is not None:
-            try:
-                channel.StopPolling()
-            except Exception:
-                pass
-        if device is not None:
-            try:
-                device.Disconnect()
-            except Exception:
-                pass
 
 def scan(x_pos, y_pos, z_pos, x_step_size, y_step_size, z_step_size):
     # Comment out this line for the real device
     #SimulationManager.Instance.InitializeSimulations()
     try:
-        DeviceManagerCLI.BuildDeviceList()
-
-        # create new device
-        serial_no = "70536944"  # Replace this line with your device's serial number
-
-        # Connect, begin polling, and enable
-        device = BenchtopStepperMotor.CreateBenchtopStepperMotor(serial_no)
-        device.Connect(serial_no)
-        time.sleep(0.25)  # wait statements are important to allow settings to be sent to the device
-
-        # For benchtop devices, get the channel
-        channel = device.GetChannel(1)
-        channel_2 = device.GetChannel(2)
-        channel_3= device.GetChannel(3)
-
-        # Ensure that the device settings have been initialized
-        if not channel.IsSettingsInitialized():
-            channel.WaitForSettingsInitialized(10000)  # 10 second timeout
-            assert channel.IsSettingsInitialized() is True
-        if not channel_2.IsSettingsInitialized():
-            channel_2.WaitForSettingsInitialized(10000)  # 10 second timeout
-            assert channel_2.IsSettingsInitialized() is True
-        if not channel_3.IsSettingsInitialized():
-            channel_3.WaitForSettingsInitialized(10000)  # 10 second timeout
-            assert channel_3.IsSettingsInitialized() is True
-        # Start polling and enable
-        channel.StartPolling(250)  # 250ms polling rate
-        time.sleep(0.25)
-        channel.EnableDevice()
-        time.sleep(1.0)  # Wait for device to enable
-        channel_2.StartPolling(250)  # 250ms polling rate
-        time.sleep(0.25)    
-        channel_2.EnableDevice()
-        time.sleep(1.0)  # Wait for device to enable
-        channel_3.StartPolling(250)  # 250ms polling rate
-        time.sleep(0.25)
-        channel_3.EnableDevice()
-        time.sleep(1.0)  # Wait for device to enable
-        
-        # Get Device Information and display description
-        device_info = channel.GetDeviceInfo()
-        print(device_info.Description)
-        device_info_2 = channel_2.GetDeviceInfo()
-        print(device_info_2.Description)
-        device_info_3 = channel_3.GetDeviceInfo()
-        print(device_info_3.Description)
-
-        # Load any configuration settings needed by the controller/stage
-        channel_config = channel.LoadMotorConfiguration(channel.DeviceID)
-        chan_settings = channel.MotorDeviceSettings
-
-        channel.GetSettings(chan_settings)
-
-        channel_config.DeviceSettingsName = 'HDR50/M'
-
-        channel_config.UpdateCurrentConfiguration()
-
-        channel.SetSettings(chan_settings, True, False)
-
-        # Do the same for channel 2
-        channel_config_2 = channel_2.LoadMotorConfiguration(channel_2.DeviceID)
-        chan_settings_2 = channel_2.MotorDeviceSettings
-        channel_2.GetSettings(chan_settings_2)
-        channel_config_2.DeviceSettingsName = 'HDR50/M'
-        channel_config_2.UpdateCurrentConfiguration()
-        channel_2.SetSettings(chan_settings_2, True, False)
-
-        # Do the same for channel 3
-        channel_config_3 = channel_3.LoadMotorConfiguration(channel_3.DeviceID)
-        chan_settings_3 = channel_3.MotorDeviceSettings
-        channel_3.GetSettings(chan_settings_3)
-        channel_config_3.DeviceSettingsName = 'HDR50/M'
-        channel_config_3.UpdateCurrentConfiguration()
-        channel_3.SetSettings(chan_settings_3, True, False)
+        channel = _get_connected_channel(1)
+        channel_2 = _get_connected_channel(2)
+        channel_3 = _get_connected_channel(3)
 
         # Home or Zero the device (if a motor/piezo)
         print("Homing Motor for channel 1")
@@ -394,14 +251,7 @@ def scan(x_pos, y_pos, z_pos, x_step_size, y_step_size, z_step_size):
         channel.Home(60000)
         channel_2.Home(60000)
         channel_3.Home(60000)
-        # Stop Polling and Disconnect
-        channel.StopPolling()
-        channel_2.StopPolling()
-        channel_3.StopPolling()
-
-        device.Disconnect()
 
     except Exception as e:
-        # this can be bad practice: It sometimes obscures the error source
-        print(e)
+        raise RuntimeError(f"Scan failed: {e}") from e
 

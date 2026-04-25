@@ -12,7 +12,7 @@ from matplotlib.gridspec import GridSpec
 
 
 # Edit this path to your collected H5 folder.
-INPUT_FOLDER = Path(r"C:\Users\wong_\Desktop\test_data")
+INPUT_FOLDER = Path(r"C:\Users\wong_\Desktop\test_data_new_1")
 
 
 def load_recording(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray], Dict[str, object]]:
@@ -154,13 +154,14 @@ def _fmt_num(value: object, precision: int = 6) -> str:
 	return f"{num:.{precision}g}"
 
 
-def print_detailed_report(file_results: List[Tuple[Path, List[Dict[str, object]]]]) -> None:
-	"""Print human-readable detailed results grouped by file and channel."""
-	print("\nDetailed results:")
+def build_detailed_report_lines(file_results: List[Tuple[Path, List[Dict[str, object]]]]) -> List[str]:
+	"""Build human-readable detailed results grouped by file and channel."""
+	lines: List[str] = ["", "Detailed results:"]
 	for path, rows in file_results:
-		print(f"\nFile: {path.name}")
+		lines.append("")
+		lines.append(f"File: {path.name}")
 		if not rows:
-			print("  No channel data found.")
+			lines.append("  No channel data found.")
 			continue
 
 		meta_keys = ("saved_at", "time_interval", "time_units", "chA_range", "chB_range", "x_pos", "y_pos")
@@ -171,37 +172,56 @@ def print_detailed_report(file_results: List[Tuple[Path, List[Dict[str, object]]
 			if value not in ("", None):
 				meta_parts.append(f"{key}={value}")
 		if meta_parts:
-			print("  Meta: " + ", ".join(meta_parts))
+			lines.append("  Meta: " + ", ".join(meta_parts))
 
 		x_pos = first.get("x_pos", "")
 		y_pos = first.get("y_pos", "")
 		if x_pos not in ("", None) or y_pos not in ("", None):
 			x_text = _fmt_num(x_pos) if x_pos not in ("", None) else "?"
 			y_text = _fmt_num(y_pos) if y_pos not in ("", None) else "?"
-			print(f"  Position: x={x_text}, y={y_text}")
+			lines.append(f"  Position: x={x_text}, y={y_text}")
 
 		for row in rows:
-			print(f"  Channel {row.get('channel', '?')}:")
-			print(
+			ch = row.get("channel", "?")
+			mean_v = _fmt_num(row.get("mean"))
+			x_pos_val = row.get("x_pos", "")
+			y_pos_val = row.get("y_pos", "")
+			x_text = _fmt_num(x_pos_val) if x_pos_val not in ("", None) else "?"
+			y_text = _fmt_num(y_pos_val) if y_pos_val not in ("", None) else "?"
+			lines.append(
+				f"  Channel {ch} | mean voltage = {mean_v} mV | position (units: 0.1 mm): x={x_text}, y={y_text}"
+			)
+			lines.append(f"  Channel {ch}:")
+			lines.append(
 				"    "
 				f"samples={row.get('n_samples', '')}, "
 				f"dt={_fmt_num(row.get('dt'))}, "
 				f"sample_rate_hz={_fmt_num(row.get('sample_rate_hz'))}"
 			)
-			print(
+			lines.append(
 				"    "
 				f"mean={_fmt_num(row.get('mean'))}, "
 				f"rms={_fmt_num(row.get('rms'))}, "
 				f"std={_fmt_num(row.get('std'))}, "
 				f"p2p={_fmt_num(row.get('p2p'))}"
 			)
-			print(
+			lines.append(
 				"    "
 				f"min={_fmt_num(row.get('min'))}, "
 				f"max={_fmt_num(row.get('max'))}, "
 				f"dominant_freq_hz={_fmt_num(row.get('dominant_freq_hz'))}, "
 				f"dominant_amp={_fmt_num(row.get('dominant_amp'))}"
 			)
+
+	return lines
+
+
+def print_detailed_report(file_results: List[Tuple[Path, List[Dict[str, object]]]]) -> List[str]:
+	"""Print detailed results and return the printed lines for optional file export."""
+	lines = build_detailed_report_lines(file_results)
+	for line in lines:
+		print(line)
+	return lines
 
 def plot_recording(path: Path, time: np.ndarray, channels: Dict[str, np.ndarray], meta: Dict[str, object]) -> None:
 	"""Plot time-domain waveforms and FFT spectra for all channels in one file."""
@@ -297,13 +317,17 @@ def main() -> int:
 		except Exception as exc:
 			failures.append((path, str(exc)))
 
+	plot_warnings: List[str] = []
+
 	# Plot each file
 	for path in files:
 		try:
 			time, channels, meta = load_recording(path)
 			#plot_recording(path, time, channels, meta)
 		except Exception as exc:
-			print(f"Warning: could not plot {path.name}: {exc}")
+			msg = f"Warning: could not plot {path.name}: {exc}"
+			print(msg)
+			plot_warnings.append(msg)
 
 	if not all_rows:
 		print("No valid channel data found.")
@@ -318,16 +342,35 @@ def main() -> int:
 		output_path = input_folder / output_path
 
 	write_csv(all_rows, output_path)
-	print_detailed_report(file_results)
+	report_lines = print_detailed_report(file_results)
 
-	print(f"Analyzed files: {len(files)}")
-	print(f"Channels analyzed: {len(all_rows)}")
-	print(f"Summary saved: {output_path}")
+	analyzed_files_line = f"Analyzed files: {len(files)}"
+	channels_analyzed_line = f"Channels analyzed: {len(all_rows)}"
+	csv_saved_line = f"Summary saved: {output_path}"
+	print(analyzed_files_line)
+	print(channels_analyzed_line)
+	print(csv_saved_line)
 
 	if failures:
 		print("Some files could not be parsed:")
 		for path, reason in failures:
 			print(f"  - {path.name}: {reason}")
+
+	summary_text_path = input_folder / "summary.txt"
+	summary_lines: List[str] = []
+	if plot_warnings:
+		summary_lines.extend(plot_warnings)
+	summary_lines.extend(report_lines)
+	summary_lines.append(analyzed_files_line)
+	summary_lines.append(channels_analyzed_line)
+	summary_lines.append(csv_saved_line)
+	if failures:
+		summary_lines.append("Some files could not be parsed:")
+		for path, reason in failures:
+			summary_lines.append(f"  - {path.name}: {reason}")
+
+	summary_text_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+	print(f"Detailed summary text saved: {summary_text_path}")
 
 	return 0
 

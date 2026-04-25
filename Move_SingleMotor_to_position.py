@@ -71,7 +71,7 @@ def main():
         channel.Home(60000)
         print("Homing Completed")
 
-        step_size = 0.2  #should correspond to *0.1 mm for the stage
+        step_size = 0.5  #should correspond to *0.1 mm for the stage
         time.sleep(2)
         print("Moving...")
         channel.MoveTo(Decimal(step_size), 60000)

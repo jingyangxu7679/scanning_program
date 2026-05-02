@@ -12,7 +12,7 @@ from matplotlib.gridspec import GridSpec
 
 
 # Edit this path to your collected H5 folder.
-INPUT_FOLDER = Path(r"C:\Users\wong_\Desktop\test_data_new_1")
+INPUT_FOLDER = Path(r"C:\Users\wong_\Desktop\test_data_04/27")
 
 
 def load_recording(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray], Dict[str, object]]:

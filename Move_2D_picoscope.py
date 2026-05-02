@@ -122,7 +122,15 @@ def main():
                 time.sleep(1)
                 x_pos = channel.DevicePosition
                 y_pos = channel_2.DevicePosition
-                test_picoscope.picoscope_block_mode_run(x_pos, y_pos)  # run the picoscope example to show that the two can be used together without issue
+                test_picoscope.picoscope_
+                
+                
+                
+                
+                
+                
+                
+                mode_run(x_pos, y_pos)  # run the picoscope example to show that the two can be used together without issue
 
                 N=N+1
             #test_picoscope.picoscope_block_mode_run()  # run the picoscope example to show that the two can be used together without issue

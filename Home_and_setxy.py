@@ -6,6 +6,7 @@ Version of Python used for Testing: 3.9
 ==================
 Example Description: This example controls the BSC200 series (Using the HDR50/M stage)
 """
+#this code is modified to home xy motors and place the x, y motor all at 4.6 mm
 import os
 import time
 import sys
@@ -35,7 +36,8 @@ def main():
         time.sleep(0.25)  # wait statements are important to allow settings to be sent to the device
 
         # For benchtop devices, get the channel
-        channel = device.GetChannel(2)
+        channel = device.GetChannel(1)
+        channel_2= device.GetChannel(2)
 
         # Ensure that the device settings have been initialized
         if not channel.IsSettingsInitialized():
@@ -67,19 +69,48 @@ def main():
         # Get parameters related to homing/zeroing/other
 
         # Home or Zero the device (if a motor/piezo)
-        #channel.Home(60000)
+        channel.Home(60000)
         print("Homing Completed")
+        if not channel_2.IsSettingsInitialized():
+            channel_2.WaitForSettingsInitialized(10000)  # 10 second timeout
+            assert channel_2.IsSettingsInitialized() is True
 
-        step_size = 0.5  #should correspond to *0.1 mm for the stage
+        # Start polling and enable
+        channel_2.StartPolling(250)  # 250ms polling rate
+        time.sleep(0.25)
+        channel_2.EnableDevice()
+        time.sleep(0.25)  # Wait for device to enable
+
+        # Get Device Information and display description
+        device_info_2 = channel_2.GetDeviceInfo()
+        print(device_info_2.Description)
+
+        # Load any configuration settings needed by the controller/stage
+        channel_config_2 = channel_2.LoadMotorConfiguration(channel_2.DeviceID)
+        chan_settings_2 = channel_2.MotorDeviceSettings
+
+        channel_2.GetSettings(chan_settings_2)
+
+        channel_config_2.DeviceSettingsName = 'HDR50/M'
+
+        channel_config_2.UpdateCurrentConfiguration()
+
+        channel_2.SetSettings(chan_settings_2, True, False)
+        channel_2.Home(60000)
+        position = 46  #should correspond to *0.1 mm for the stage
         time.sleep(2)
         print("Moving...")
-        channel.MoveTo(Decimal(step_size), 60000)
-        print(f"Position = {channel.DevicePosition}")
+        channel.MoveTo(Decimal(position), 60000)
+        print(f"Position_x = {channel.DevicePosition}")
         time.sleep(2)
+        channel_2.MoveTo(Decimal(position), 60000)
+        time.sleep(2)
+        print(f"Position_y = {channel_2.DevicePosition}")
         #Home after moving 
         #channel.Home(60000)
         # Stop Polling and Disconnect
         channel.StopPolling()
+        channel_2.StopPolling()
         device.Disconnect()
 
     except Exception as e:

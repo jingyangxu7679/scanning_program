@@ -11,7 +11,9 @@ Example Description: This example controls the BSC200 series (Using the HDR50/M 
 import os
 import time
 import sys
+import csv
 import clr
+from datetime import datetime, timezone, timedelta
 
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.DeviceManagerCLI.dll")
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.GenericMotorCLI.dll")
@@ -104,42 +106,54 @@ def main():
 
         # Home or Zero the device (if a motor/piezo)
         print("Homing Motor for channel 1")
-        channel.Home(60000)
+        #channel.Home(60000)
         print("Homing Completed")
 
         print("Homing Motor for channel 2")
-        channel_2.Home(60000)
+        #channel_2.Home(60000)
         print("Homing Completed")
-        step_size = 0.1
-        time.sleep(2)
-        for N in range(2):
-            print("Moving...")
-            channel.MoveTo(Decimal(step_size*N), 60000)
-            print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
-            for N in range (2):
-                channel_2.MoveTo(Decimal(step_size*N), 60000)
-                print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
-                time.sleep(1)
-                x_pos = channel.DevicePosition
-                y_pos = channel_2.DevicePosition
-                test_picoscope.picoscope_
-                
-                
-                
-                
-                
-                
-                
-                mode_run(x_pos, y_pos)  # run the picoscope example to show that the two can be used together without issue
 
+        output_dir = os.path.join(os.path.expanduser("~"), "Desktop", "motor_pos_time")
+        os.makedirs(output_dir, exist_ok=True)
+        csv_filename = f"motor_pos_time_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        csv_path = os.path.join(output_dir, csv_filename)
+
+        tz_minus_7 = timezone(timedelta(hours=-7))
+
+        csv_file = open(csv_path, "w", newline="", encoding="utf-8")
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(["Time (UTC -07:00 yyyy-MM-dd HH:mm:ss)", "x_pos", " y_pos"])
+        print(f"Saving motor position timestamps to: {csv_path}")
+
+        step_size = 0.2
+        time.sleep(2)
+        try:
+            for N in range(8):
+                print("Moving...")
+                channel.MoveTo(Decimal(step_size*N), 60000)
+                print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
+                for N in range (1):
+                    channel_2.MoveTo(Decimal(step_size*N), 60000)
+                    print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
+                    time.sleep(1)
+                    x_pos = channel.DevicePosition
+                    y_pos = channel_2.DevicePosition
+                    print(f"Current x position: {x_pos}, Current y position: {y_pos}")
+
+                    timestamp_str = datetime.now(tz_minus_7).strftime("%Y-%m-%d %H:%M:%S")
+                    csv_writer.writerow([timestamp_str, str(x_pos), str(y_pos)])
+                    csv_file.flush()
+
+                    N=N+1
+                #test_picoscope.picoscope_block_mode_run()  # run the picoscope example to show that the two can be used together without issue
+                time.sleep(2)
                 N=N+1
-            #test_picoscope.picoscope_block_mode_run()  # run the picoscope example to show that the two can be used together without issue
-            time.sleep(2)
-            N=N+1
+        finally:
+            csv_file.close()
         #Home after moving 
-        channel.Home(60000)
-        channel_2.Home(60000)
-        channel_3.Home(60000)
+        #channel.Home(60000)
+        #channel_2.Home(60000)
+        #channel_3.Home(60000)
         # Stop Polling and Disconnect
         channel.StopPolling()
         channel_2.StopPolling()

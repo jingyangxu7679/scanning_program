@@ -124,18 +124,19 @@ def main():
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(["Time (UTC -07:00 yyyy-MM-dd HH:mm:ss)", "x_pos", " y_pos"])
         print(f"Saving motor position timestamps to: {csv_path}")
-
-        step_size = 0.2
-        time.sleep(2)
+        step_size = 0.1  #should correspond to *0.1 mm for the stage
+        y_step_size = 0.1
+        #time.sleep(1)
         try:
-            for N in range(8):
-                print("Moving...")
-                channel.MoveTo(Decimal(step_size*N), 60000)
-                print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
-                for N in range (1):
-                    channel_2.MoveTo(Decimal(step_size*N), 60000)
-                    print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
-                    time.sleep(1)
+            for N in range(4):
+                print("Moving channel 2...")
+                channel_2.MoveTo(Decimal(y_step_size*N), 60000)
+                print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
+
+                for N in range (19):
+                    channel.MoveTo(Decimal(step_size*N), 60000)
+                    print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
+                    #time.sleep(1)
                     x_pos = channel.DevicePosition
                     y_pos = channel_2.DevicePosition
                     print(f"Current x position: {x_pos}, Current y position: {y_pos}")
@@ -146,7 +147,8 @@ def main():
 
                     N=N+1
                 #test_picoscope.picoscope_block_mode_run()  # run the picoscope example to show that the two can be used together without issue
-                time.sleep(2)
+
+                #time.sleep(1)
                 N=N+1
         finally:
             csv_file.close()

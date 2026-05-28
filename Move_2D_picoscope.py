@@ -18,11 +18,14 @@ from datetime import datetime, timezone, timedelta
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.DeviceManagerCLI.dll")
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\Thorlabs.MotionControl.GenericMotorCLI.dll")
 clr.AddReference("C:\\Program Files\\Thorlabs\\Kinesis\\ThorLabs.MotionControl.Benchtop.StepperMotorCLI.dll")
+import Control_picometer8742
 from Thorlabs.MotionControl.DeviceManagerCLI import *
 from Thorlabs.MotionControl.GenericMotorCLI import *
 from Thorlabs.MotionControl.Benchtop.StepperMotorCLI import *
 from System import Decimal  # necessary for real world units
 import test_picoscope
+initial_pos=0
+initial_z_focus=1967
 
 def main():
 
@@ -127,28 +130,34 @@ def main():
         step_size = 0.1  #should correspond to *0.1 mm for the stage
         y_step_size = 0.1
         #time.sleep(1)
+        #z_focus_counter=0
         try:
-            for N in range(4):
+            for N in range(3):
                 print("Moving channel 2...")
                 channel_2.MoveTo(Decimal(y_step_size*N), 60000)
                 print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
 
-                for N in range (19):
+                for N in range (21):
                     channel.MoveTo(Decimal(step_size*N), 60000)
                     print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
                     #time.sleep(1)
                     x_pos = channel.DevicePosition
                     y_pos = channel_2.DevicePosition
                     print(f"Current x position: {x_pos}, Current y position: {y_pos}")
+                    if N%10==0:
+                        print("Adjust z focus")
+                        time.sleep(1)
+                        Control_picometer8742.adjust_focus(x_current=x_pos, initial_pos=0, initial_z_focus=initial_z_focus)  # adjust z focus to initial_z_focus (900 steps = 90 um)
 
                     timestamp_str = datetime.now(tz_minus_7).strftime("%Y-%m-%d %H:%M:%S")
                     csv_writer.writerow([timestamp_str, str(x_pos), str(y_pos)])
                     csv_file.flush()
+                    time.sleep(1)
 
                     N=N+1
                 #test_picoscope.picoscope_block_mode_run()  # run the picoscope example to show that the two can be used together without issue
 
-                #time.sleep(1)
+                time.sleep(1)
                 N=N+1
         finally:
             csv_file.close()

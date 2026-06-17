@@ -29,11 +29,19 @@ from System.Collections import IDictionaryEnumerator
 def get_z_focus(x_current, initial_pos, initial_z_focus):
     x_current = float(str(x_current)) * 0.1  # convert to mm for the stage
     #z_focus = initial_z_focus + 3112 * (x_current - initial_pos)
-    z_focus = initial_z_focus + 900 * (x_current - initial_pos)
+    z_focus = initial_z_focus + 150 * (x_current - initial_pos)
+    z_relative=150 * (x_current - initial_pos)
+    #return z_focus
+    return z_relative
+def get_x_focus_xy(x_current, y_current, initial_pos_X, initial_pos_Y, initial_z_focus):
+    # Placeholder function for future implementation
+    x_current=float(str(x_current)) * 0.1
+    y_current=float(str(y_current)) * 0.1
+    z_focus=-70.3+2455.53*(x_current-initial_pos_X)+3175.58*(y_current-initial_pos_Y)
     return z_focus
 
-def adjust_focus(x_current, initial_pos, initial_z_focus):
-    z_focus = get_z_focus(x_current, initial_pos, initial_z_focus)
+def adjust_focus(x_current, y_current, initial_pos_X, initial_pos_Y, initial_z_focus):
+    z_focus = get_x_focus_xy(x_current, y_current, initial_pos_X, initial_pos_Y, initial_z_focus)
     # Code to move the stage to the new z_focus position would go here
     print(f"Adjusting focus to z={z_focus} based on x={x_current}")
     # Call the class constructor to create an object
@@ -75,7 +83,8 @@ def adjust_focus(x_current, initial_pos, initial_z_focus):
 
                 #Position=oUSB.Query (strDeviceKey, "4TP?", strBldr)
                 target_steps = int(round(z_focus))      # convert numeric z_focus to integer steps
-                cmd = f"4PA{target_steps}"              # e.g. "4PA900"
+                #cmd = f"4PA{target_steps}"              # e.g. "4PA900"
+                cmd = f"4PR{target_steps}"              # e.g. "4PA900"
 
                 strBldr.Remove(0, strBldr.Length)
                 nReturn2 = oUSB.Query(strDeviceKey, cmd, strBldr)

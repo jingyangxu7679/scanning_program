@@ -62,9 +62,9 @@ if (bStatus) :
             nReturn = oUSB.Query (strDeviceKey, "*IDN?", strBldr)
             print ("Return Status = %d" % nReturn)
             print ("*IDN Response = %s\n" % strBldr.ToString ())#prints what have been stored in the buffer
-
+            #add code here
             #Position=oUSB.Query (strDeviceKey, "4TP?", strBldr)
-            nReturn2 = oUSB.Query(strDeviceKey, "4PA900", strBldr)
+            nReturn2 = oUSB.Query(strDeviceKey, "4PR400", strBldr)
             print("Return Status = %d" % nReturn2)
             print("Move Response = %s" % strBldr.ToString())
 

@@ -91,7 +91,7 @@ def disconnect_all_channels():
     N=1
     for channel in connected_channels:
         try:
-            home_motor(N)
+            #home_motor(N)
             channel.StopPolling()
             N=N+1
         except Exception:
@@ -132,7 +132,7 @@ def single_move(_ip_addr, channel_num, pos_num):
         channel_in = _get_connected_channel(channel_num)
 
         print("Homing Motor")
-        channel_in.Home(60000)
+        #channel_in.Home(60000)
         print("Homing Completed")
 
         step_size = float(pos_num)
@@ -217,12 +217,12 @@ def scan(x_pos, y_pos, z_pos, x_step_size, y_step_size, z_step_size):
 
         # Home or Zero the device (if a motor/piezo)
         print("Homing Motor for channel 1")
-        channel.Home(60000)
+        #channel.Home(60000)
         print("Homing Completed")
         print("Homing Motor for channel 2")
-        channel_2.Home(60000)
+        #channel_2.Home(60000)
         print("Homing Completed")
-        channel_3.Home(60000)
+        #channel_3.Home(60000)
         print("Homing Completed")
         time.sleep(2)
         z_itr=int(z_pos/z_step_size)+1
@@ -248,9 +248,9 @@ def scan(x_pos, y_pos, z_pos, x_step_size, y_step_size, z_step_size):
                 N=N+1
             N=N+1
         #Home after moving 
-        channel.Home(60000)
-        channel_2.Home(60000)
-        channel_3.Home(60000)
+        #channel.Home(60000)
+        #channel_2.Home(60000)
+        #channel_3.Home(60000)
 
     except Exception as e:
         raise RuntimeError(f"Scan failed: {e}") from e

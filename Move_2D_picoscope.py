@@ -36,7 +36,7 @@ def shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z
     y_pos_float = float(str(y_pos))
     z_start_float = float(str(initial_pos_Z))
     x_change = (x_pos_float / 1.5) * 0.04
-    y_change = ((y_pos_float) / 1.5) * 0.03
+    y_change = ((y_pos_float) / 1.5) * 0.03#should be 0.5
     new_z_pos = z_start_float + x_change - y_change
     new_z_pos = Decimal(new_z_pos)
     print(f"Shifting z focus stage to new position: {new_z_pos}")
@@ -150,9 +150,10 @@ def main():
         #time.sleep(1)
         #z_focus_counter=0
         try:
-            for M in range(11):
+            for M in range(5):
                 print("Moving channel 2...")
                 channel_2.MoveTo(Decimal(y_step_size*M), 60000)
+                #time.sleep(1)
                 print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
 
                 for N in range (41):
@@ -166,13 +167,13 @@ def main():
                     print("Adjust z focus")
                     time.sleep(1)
                     #Control_picometer8742.adjust_focus(x_current=x_pos, y_current=y_pos, initial_pos_X=initial_pos_X, initial_pos_Y=initial_pos_Y, initial_z_focus=initial_z_focus)  # adjust z focus to initial_z_focus (900 steps = 90 um)
-                    #if N%5==0: # adjust z focus every 15 steps in x direction (every 1.5 mm)
-                        #z_focus_pos=shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z) 
+                    if N%5==0: # adjust z focus every 15 steps in x direction (every 1.5 mm)
+                        z_focus_pos=shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z) 
                     
                         #channel_3.MoveTo(z_focus_pos, 60000)
-                        #z_actual = channel_3.DevicePosition
-                        #z_error = float(str(z_actual)) - float(str(z_focus_pos))
-                        #print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error}")
+                        z_actual = channel_3.DevicePosition
+                        z_error = float(str(z_actual)) - float(str(z_focus_pos))
+                        print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error}")
                     timestamp_str = datetime.now(tz_minus_7).strftime("%Y-%m-%d %H:%M:%S")
                     csv_writer.writerow([timestamp_str, str(x_pos), str(y_pos)])#can also store z pos later
                     csv_file.flush()

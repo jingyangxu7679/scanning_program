@@ -1,0 +1,18 @@
+
+Detailed results:
+
+File: MeasurementLog2026623_test1mswithscanning_2.csv
+  Channel RMS (A) (V) | mean voltage = 0.00582316 mV | position (units: 0.1 mm): x=?, y=?
+  Channel RMS (A) (V):
+    samples=500, dt=1, sample_rate_hz=1
+    mean=0.00582316, rms=0.00583947, std=0.000436061, p2p=0.00249304
+    min=0.00476251, max=0.00725555, dominant_freq_hz=0.004, dominant_amp=0.0464272
+  Channel Mean (A) (V) | mean voltage = 0.00582278 mV | position (units: 0.1 mm): x=?, y=?
+  Channel Mean (A) (V):
+    samples=500, dt=1, sample_rate_hz=1
+    mean=0.00582278, rms=0.00583907, std=0.000435872, p2p=0.00248755
+    min=0.00476463, max=0.00725218, dominant_freq_hz=0.004, dominant_amp=0.0463451
+Analyzed files: 1
+Channels analyzed: 2
+Summary saved: C:\Users\wong_\Desktop\scanning_program-1\analyzed_data_summary\summary_20260623.csv
+Position-time-measurement saved: C:\Users\wong_\Desktop\scanning_program-1\analyzed_data_summary\position_time_measurement_timing_trial2_20260623.txt

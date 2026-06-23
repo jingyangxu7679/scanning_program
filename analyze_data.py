@@ -18,9 +18,9 @@ OUTPUT_FOLDER = Path(__file__).resolve().parent / "analyzed_data_summary"
 
 # Specify exact filenames to analyze (leave empty to analyze all files)
 # Example: "measurement_20260618.csv"
-input_data_name = "MeasurementLog2026622.csv"
+input_data_name = "MeasurementLog2026623_test1mswithscanning_2.csv"
 # Example: "motor_pos_time_20260618_160443.csv"
-motor_pos_file_name = "motor_pos_time_20260622_133039.csv"
+motor_pos_file_name = "motor_pos_time_20260623_155832.csv"
 
 def load_motor_positions(csv_path: Path) -> Tuple[List[datetime], List[float], List[float]]:
 	"""Load motor positions from motor_pos_time CSV file.
@@ -635,7 +635,7 @@ def main() -> int:
 	output_stem = Path(output_name).stem
 	output_suffix = Path(output_name).suffix or ".csv"
 	output_path = OUTPUT_FOLDER / f"{output_stem}_{date_suffix}{output_suffix}"
-	ptm_output_path = OUTPUT_FOLDER / f"position_time_measurement_trial1_{date_suffix}.txt"
+	ptm_output_path = OUTPUT_FOLDER / f"position_time_measurement_timing_trial2_{date_suffix}.txt"
 
 	write_csv(all_rows, output_path)
 	write_position_time_measurements(files, ptm_output_path)

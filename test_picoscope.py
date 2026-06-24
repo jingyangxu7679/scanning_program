@@ -218,3 +218,5 @@ def picoscope_block_mode_run(x_pos, y_pos):
 
     # display status returns
     print(status)
+
+picoscope_block_mode_run(x_pos=0.0, y_pos=0.0)

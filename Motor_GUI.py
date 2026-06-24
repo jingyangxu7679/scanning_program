@@ -48,7 +48,7 @@ class MotorPanel(ttk.LabelFrame):
 
 		current_position_entry = ttk.Entry(current_position_frame, textvariable=self.current_position_var, state="readonly")
 		current_position_entry.grid(row=0, column=0, sticky="ew")
-		ttk.Label(current_position_frame, text="mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+		ttk.Label(current_position_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
 
 		ttk.Label(self, text="Target position").grid(row=3, column=0, sticky="w")
 		position_frame = ttk.Frame(self)
@@ -56,7 +56,7 @@ class MotorPanel(ttk.LabelFrame):
 		position_frame.columnconfigure(0, weight=1)
 
 		ttk.Entry(position_frame, textvariable=self.position_var).grid(row=0, column=0, sticky="ew")
-		ttk.Label(position_frame, text="mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+		ttk.Label(position_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
 
 		move_btn = ttk.Button(self, text="Move", command=self.move_to_position)
 		move_btn.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(6, 10))
@@ -178,42 +178,42 @@ class ScanPanel(ttk.LabelFrame):
 		x_pos_frame.grid(row=2, column=0, sticky="ew", padx=(0, 8))
 		x_pos_frame.columnconfigure(0, weight=1)
 		ttk.Entry(x_pos_frame, textvariable=self.x_position_var).grid(row=0, column=0, sticky="ew")
-		ttk.Label(x_pos_frame, text="mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+		ttk.Label(x_pos_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
 
 		ttk.Label(self, text="Y Position").grid(row=1, column=1, sticky="w")
 		y_pos_frame = ttk.Frame(self)
 		y_pos_frame.grid(row=2, column=1, sticky="ew", padx=(0, 8))
 		y_pos_frame.columnconfigure(0, weight=1)
 		ttk.Entry(y_pos_frame, textvariable=self.y_position_var).grid(row=0, column=0, sticky="ew")
-		ttk.Label(y_pos_frame, text="mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+		ttk.Label(y_pos_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
 
 		ttk.Label(self, text="Z Position").grid(row=1, column=2, sticky="w")
 		z_pos_frame = ttk.Frame(self)
 		z_pos_frame.grid(row=2, column=2, sticky="ew", padx=(0, 8))
 		z_pos_frame.columnconfigure(0, weight=1)
 		ttk.Entry(z_pos_frame, textvariable=self.z_position_var).grid(row=0, column=0, sticky="ew")
-		ttk.Label(z_pos_frame, text="mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+		ttk.Label(z_pos_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
 
 		ttk.Label(self, text="X Step Size").grid(row=1, column=3, sticky="w")
 		x_step_frame = ttk.Frame(self)
 		x_step_frame.grid(row=2, column=3, sticky="ew", padx=(0, 8))
 		x_step_frame.columnconfigure(0, weight=1)
 		tk.Entry(x_step_frame, textvariable=self.x_step_size_var).grid(row=0, column=0, sticky="ew")
-		ttk.Label(x_step_frame, text="mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+		ttk.Label(x_step_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
 
 		ttk.Label(self, text="Y Step Size").grid(row=1, column=4, sticky="w")
 		y_step_frame = ttk.Frame(self)
 		y_step_frame.grid(row=2, column=4, sticky="ew", padx=(0, 8))
 		y_step_frame.columnconfigure(0, weight=1)
 		tk.Entry(y_step_frame, textvariable=self.y_step_size_var).grid(row=0, column=0, sticky="ew")
-		ttk.Label(y_step_frame, text="mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+		ttk.Label(y_step_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
 
 		ttk.Label(self, text="Z Step Size").grid(row=1, column=5, sticky="w")
 		z_step_frame = ttk.Frame(self)
 		z_step_frame.grid(row=2, column=5, sticky="ew")
 		z_step_frame.columnconfigure(0, weight=1)
 		tk.Entry(z_step_frame, textvariable=self.z_step_size_var).grid(row=0, column=0, sticky="ew")
-		ttk.Label(z_step_frame, text="mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
+		ttk.Label(z_step_frame, text="*10^-1 mm").grid(row=0, column=1, sticky="w", padx=(6, 0))
 
 		ttk.Button(self, text="Start Scan", command=self.start_scan).grid(
 			row=3, column=0, columnspan=6, sticky="ew", pady=(10, 0)

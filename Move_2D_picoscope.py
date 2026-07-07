@@ -23,7 +23,7 @@ from Thorlabs.MotionControl.DeviceManagerCLI import *
 from Thorlabs.MotionControl.GenericMotorCLI import *
 from Thorlabs.MotionControl.Benchtop.StepperMotorCLI import *
 from System import Decimal  # necessary for real world units
-import test_picoscope
+#import test_picoscope
 initial_pos=0
 initial_pos_X=0
 initial_pos_Y=0
@@ -35,9 +35,10 @@ def shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z
     x_pos_float = float(str(x_pos))
     y_pos_float = float(str(y_pos))
     z_start_float = float(str(initial_pos_Z))
-    x_change = (x_pos_float / 1.5) * 0.04
-    y_change = ((y_pos_float) / 1.5) * 0.03#should be 0.5
-    new_z_pos = z_start_float + x_change - y_change
+    #x_change = (x_pos_float / 1.5) * 0.04
+    x_change = (x_pos_float / 0.15) * 0.008
+    y_change = ((y_pos_float) / 0.05) * 0.003#should be 0.5
+    new_z_pos = z_start_float - x_change - y_change
     new_z_pos = Decimal(new_z_pos)
     print(f"Shifting z focus stage to new position: {new_z_pos}")
     return new_z_pos
@@ -99,7 +100,7 @@ def main():
 
         channel.GetSettings(chan_settings)
 
-        channel_config.DeviceSettingsName = 'HDR50/M'
+        channel_config.DeviceSettingsName = 'HS NanoMax 300 X Axis (DRV208)'
 
         channel_config.UpdateCurrentConfiguration()
 
@@ -109,7 +110,7 @@ def main():
         channel_config_2 = channel_2.LoadMotorConfiguration(channel_2.DeviceID)
         chan_settings_2 = channel_2.MotorDeviceSettings
         channel_2.GetSettings(chan_settings_2)
-        channel_config_2.DeviceSettingsName = 'HDR50/M'
+        channel_config_2.DeviceSettingsName = 'HS NanoMax 300 Y Axis (DRV208)'
         channel_config_2.UpdateCurrentConfiguration()
         channel_2.SetSettings(chan_settings_2, True, False)
 
@@ -117,7 +118,7 @@ def main():
         channel_config_3 = channel_3.LoadMotorConfiguration(channel_3.DeviceID)
         chan_settings_3 = channel_3.MotorDeviceSettings
         channel_3.GetSettings(chan_settings_3)
-        channel_config_3.DeviceSettingsName = 'HDR50/M'
+        channel_config_3.DeviceSettingsName = 'HS NanoMax 300 Z Axis (DRV208)'
         channel_config_3.UpdateCurrentConfiguration()
         channel_3.SetSettings(chan_settings_3, True, False)
 
@@ -145,15 +146,15 @@ def main():
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(["Time (UTC -07:00 yyyy-MM-dd HH:mm:ss)", "x_pos", " y_pos"])
         print(f"Saving motor position timestamps to: {csv_path}")
-        step_size = 0.1  #should correspond to *0.1 mm for the stage
-        y_step_size = 0.1
+        step_size = 0.01  #should correspond to *0.1 mm for the stage
+        y_step_size = 0.01
         #time.sleep(1)
         #z_focus_counter=0
         try:
             for M in range(5):
                 print("Moving channel 2...")
                 channel_2.MoveTo(Decimal(y_step_size*M), 60000)
-                #time.sleep(1)
+                time.sleep(1)
                 print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
 
                 for N in range (41):
@@ -170,7 +171,7 @@ def main():
                     if N%5==0: # adjust z focus every 15 steps in x direction (every 1.5 mm)
                         z_focus_pos=shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z) 
                     
-                        #channel_3.MoveTo(z_focus_pos, 60000)
+                        channel_3.MoveTo(z_focus_pos, 60000)
                         z_actual = channel_3.DevicePosition
                         z_error = float(str(z_actual)) - float(str(z_focus_pos))
                         print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error}")

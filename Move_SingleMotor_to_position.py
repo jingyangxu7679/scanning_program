@@ -35,7 +35,7 @@ def main():
         time.sleep(0.25)  # wait statements are important to allow settings to be sent to the device
 
         # For benchtop devices, get the channel
-        channel = device.GetChannel(2)
+        channel = device.GetChannel(3)
 
         # Ensure that the device settings have been initialized
         if not channel.IsSettingsInitialized():
@@ -58,7 +58,7 @@ def main():
 
         channel.GetSettings(chan_settings)
 
-        channel_config.DeviceSettingsName = 'HDR50/M'
+        channel_config.DeviceSettingsName = 'HS NanoMax 300 Z Axis (DRV208)'
 
         channel_config.UpdateCurrentConfiguration()
 
@@ -68,9 +68,9 @@ def main():
 
         # Home or Zero the device (if a motor/piezo)
         #channel.Home(60000)
-        print("Homing Completed")
+        #print("Homing Completed")
 
-        step_size = 0.5  #should correspond to *0.1 mm for the stage
+        step_size = 0.1  #should correspond to *0.1 mm for the stage
         time.sleep(2)
         print("Moving...")
         channel.MoveTo(Decimal(step_size), 60000)

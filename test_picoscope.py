@@ -5,6 +5,7 @@
 # This example opens a 2000 driver device, sets up two channels and a trigger then collects a block of data.
 # This data is then plotted as mV against time in ns.
 
+import argparse
 import ctypes
 import numpy as np
 from picosdk.ps2000 import ps2000 as ps
@@ -49,6 +50,14 @@ def _as_hdf5_attr_value(value):
         return np.asarray([str(v) for v in np.ravel(arr)], dtype=str_dtype).reshape(arr.shape)
 
     return arr
+
+
+def _to_float(value):
+    """Convert native numbers or .NET Decimal-like values to Python float."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(str(value))
 
 
 def save_recording_hdf5(path, time, channels, channel_names=None, meta=None, compression="gzip", compression_opts=4, x_pos=None, y_pos=None):
@@ -101,7 +110,7 @@ def picoscope_block_mode_run(x_pos, y_pos):
     # coupling type = PS2000_DC = 1
     # range = PS2000_2V = 7
     # analogue offset = 0 V
-    chARange = 2
+    chARange = 3 #3 correspond to range of 100 mV
     status["setChA"] = ps.ps2000_set_channel(chandle, 0, 1, 1, chARange)
     assert_pico2000_ok(status["setChA"])
 
@@ -113,7 +122,7 @@ def picoscope_block_mode_run(x_pos, y_pos):
     # range = PS2000_2V = 7
     # analogue offset = 0 V
     chBRange = 2
-    status["setChB"] = ps.ps2000_set_channel(chandle, 1, 1, 1, chBRange)
+    status["setChB"] = ps.ps2000_set_channel(chandle, 1, 0, 1, chBRange)
     assert_pico2000_ok(status["setChB"])
 
     # Set up single trigger
@@ -127,8 +136,8 @@ def picoscope_block_mode_run(x_pos, y_pos):
     assert_pico2000_ok(status["trigger"])
 
     # Set number of pre and post trigger samples to be collected
-    preTriggerSamples = 1000
-    postTriggerSamples = 1000
+    preTriggerSamples = 950
+    postTriggerSamples = 950
     maxSamples = preTriggerSamples + postTriggerSamples
 
     # Get timebase information
@@ -141,10 +150,10 @@ def picoscope_block_mode_run(x_pos, y_pos):
     # pointer to time_units = ctypes.byref(timeUnits)
     # oversample = 1 = oversample
     # pointer to max_samples = ctypes.byref(maxSamplesReturn)
-    timebase = 8
+    timebase = 15 #correspond to sampling rate of 3.05KS/s
     timeInterval = ctypes.c_int32()
     timeUnits = ctypes.c_int32()
-    oversample = ctypes.c_int16(1)
+    oversample = ctypes.c_int16(2)
     maxSamplesReturn = ctypes.c_int32()
     status["getTimebase"] = ps.ps2000_get_timebase(chandle, timebase, maxSamples, ctypes.byref(timeInterval), ctypes.byref(timeUnits), oversample, ctypes.byref(maxSamplesReturn))
     assert_pico2000_ok(status["getTimebase"])
@@ -198,9 +207,14 @@ def picoscope_block_mode_run(x_pos, y_pos):
         "chA_range": chARange,
         "chB_range": chBRange,
     }
-    filename = f"picoscope_recording_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.h5"
+    x_str = f"{_to_float(x_pos):.3f}".replace("-", "m").replace(".", "p")
+    y_str = f"{_to_float(y_pos):.3f}".replace("-", "m").replace(".", "p")
+    filename = (
+        f"picoscope_recording_x{x_str}_y{y_str}_"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.h5"
+    )
     # save to Desktop/test_data
-    save_dir = os.path.join(os.path.expanduser("~"), "Desktop", "test_data_04/27")
+    save_dir = os.path.join(os.path.expanduser("~"), "Desktop", "test_data_04/27/0725_scan2")
     os.makedirs(save_dir, exist_ok=True)
     filepath = os.path.join(save_dir, filename)
     save_recording_hdf5(filepath, time, channels, meta=meta, x_pos=x_pos, y_pos=y_pos)
@@ -219,4 +233,17 @@ def picoscope_block_mode_run(x_pos, y_pos):
     # display status returns
     print(status)
 
-picoscope_block_mode_run(x_pos=0.0, y_pos=0.0)
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Run a single PicoScope PS2000 block-mode capture.")
+    parser.add_argument("--x-pos", type=float, required=True, help="X position to tag/save with this recording")
+    parser.add_argument("--y-pos", type=float, required=True, help="Y position to tag/save with this recording")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    # Run as a standalone process (see Move_2D_picoscope.py). This keeps the PicoScope
+    # SDK's native ctypes calls out of the same process as pythonnet's hosted .NET CLR,
+    # which otherwise caused a fatal "PyEval_RestoreThread ... GIL released" crash.
+    args = _parse_args()
+    picoscope_block_mode_run(x_pos=args.x_pos, y_pos=args.y_pos)

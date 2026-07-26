@@ -41,7 +41,7 @@ assert_pico2000_ok(status["setChA"])
 # range = PS2000_2V = 7
 # analogue offset = 0 V
 chBRange = 2
-status["setChB"] = ps.ps2000_set_channel(chandle, 1, 0, 0, chBRange)
+status["setChB"] = ps.ps2000_set_channel(chandle, 1, 1, 0, chBRange)
 assert_pico2000_ok(status["setChB"])
 
 # Set up single trigger

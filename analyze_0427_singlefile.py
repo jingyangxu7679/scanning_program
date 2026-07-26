@@ -12,9 +12,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-DEFAULT_DATA_DIR = Path.home() / "Desktop" / "test_data_04" / "27" / "0725_scan2"
-CSV_DIRNAME = "CSV"
-GRAPH_DIRNAME = "GRAPH"
+DEFAULT_DATA_DIR = Path.home() / "Desktop" / "test_data_04" / "27" / "0722_testing"
+CSV_DIRNAME = "CSV_single"
+GRAPH_DIRNAME = "GRAPH_single"
 
 POS_PATTERN = re.compile(r"x(?P<x>m?\d+p\d+)_y(?P<y>m?\d+p\d+)", re.IGNORECASE)
 
@@ -43,6 +43,10 @@ def _decode_position_token(token: str) -> float:
     return float(token_norm)
 
 
+def _encode_position_token(value: float) -> str:
+    return f"{value:.3f}".replace("-", "m").replace(".", "p")
+
+
 def extract_position_from_name(file_stem: str) -> Tuple[str, float | None, float | None]:
     match = POS_PATTERN.search(file_stem)
     if not match:
@@ -52,6 +56,36 @@ def extract_position_from_name(file_stem: str) -> Tuple[str, float | None, float
     y_raw = match.group("y")
     label = f"x{x_raw}_y{y_raw}"
     return label, _decode_position_token(x_raw), _decode_position_token(y_raw)
+
+
+def find_file_by_position(data_dir: Path, x_pos: float, y_pos: float, tolerance: float = 1e-9) -> Path:
+    """Find newest .h5 file in data_dir matching requested x/y position."""
+    if not data_dir.exists() or not data_dir.is_dir():
+        raise FileNotFoundError(f"Data directory not found: {data_dir}")
+
+    x_token = _encode_position_token(x_pos)
+    y_token = _encode_position_token(y_pos)
+    pattern = f"picoscope_recording_x{x_token}_y{y_token}_*.h5"
+    direct_matches = sorted(data_dir.glob(pattern), key=lambda p: p.stat().st_mtime)
+    if direct_matches:
+        return direct_matches[-1]
+
+    # Fallback for any token formatting differences: parse and compare numerically.
+    numeric_matches: List[Path] = []
+    for path in data_dir.glob("picoscope_recording_*.h5"):
+        _, x_file, y_file = extract_position_from_name(path.stem)
+        if x_file is None or y_file is None:
+            continue
+        if abs(x_file - x_pos) <= tolerance and abs(y_file - y_pos) <= tolerance:
+            numeric_matches.append(path)
+
+    if not numeric_matches:
+        raise FileNotFoundError(
+            f"No file found for x={x_pos:.3f}, y={y_pos:.3f} in {data_dir}"
+        )
+
+    numeric_matches.sort(key=lambda p: p.stat().st_mtime)
+    return numeric_matches[-1]
 
 
 def load_h5(path: Path) -> Tuple[np.ndarray, Dict[str, np.ndarray], Dict[str, object]]:
@@ -221,10 +255,14 @@ def summarize_file(path: Path) -> Dict[str, object]:
     return row
 
 
-def write_summary_csv(csv_dir: Path, rows: List[Dict[str, object]]) -> Path:
+def write_summary_csv(csv_dir: Path, rows: List[Dict[str, object]], position_label: str | None = None) -> Path:
     csv_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = csv_dir / f"summary_0427_{timestamp}.csv"
+    if position_label:
+        safe_label = re.sub(r"[^A-Za-z0-9_\-]", "_", position_label)
+        out_path = csv_dir / f"summary_0427_{safe_label}_{timestamp}.csv"
+    else:
+        out_path = csv_dir / f"summary_0427_{timestamp}.csv"
 
     with out_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
@@ -234,9 +272,44 @@ def write_summary_csv(csv_dir: Path, rows: List[Dict[str, object]]) -> Path:
     return out_path
 
 
+def analyze_single(
+    x: float,
+    y: float,
+    data_dir: Path | str = DEFAULT_DATA_DIR,
+    tolerance: float = 1e-9,
+) -> Dict[str, object]:
+    """Analyze the recording at (x, y), save CSV/plot, and return key metrics."""
+    resolved_data_dir = Path(data_dir).expanduser().resolve()
+    file_path = find_file_by_position(resolved_data_dir, x, y, tolerance=tolerance)
+
+    output_root = file_path.parent
+    csv_dir = output_root / CSV_DIRNAME
+    graph_dir = output_root / GRAPH_DIRNAME
+
+    row = summarize_file(file_path)
+    csv_path = write_summary_csv(csv_dir, [row], position_label=str(row.get("position_label", "xNA_yNA")))
+
+    time, channels, meta = load_h5(file_path)
+    position_label, x_pos, y_pos = choose_position(meta, file_path.stem)
+    save_plot(graph_dir, file_path, position_label, time, channels)
+
+    return {
+        "file": str(file_path),
+        "position_label": position_label,
+        "x_pos": x_pos,
+        "y_pos": y_pos,
+        "mean_A_mV": row["mean_A_mV"],
+        "mean_B_mV": row["mean_B_mV"],
+        "snr_A_dB": row["snr_A_dB"],
+        "snr_B_dB": row["snr_B_dB"],
+        "summary_csv": str(csv_path),
+        "graph_dir": str(graph_dir),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze all 04/27 PicoScope files: mean and peak-to-peak for channels A/B, CSV summary, and plots."
+        description="Analyze one PicoScope .h5 file selected by x/y position from a folder."
     )
     parser.add_argument(
         "--data-dir",
@@ -244,34 +317,35 @@ def main() -> None:
         default=DEFAULT_DATA_DIR,
         help=f"Folder containing .h5 recordings (default: {DEFAULT_DATA_DIR})",
     )
+    parser.add_argument(
+        "--x-pos",
+        type=float,
+        required=True,
+        help="Requested x position (example: 0.01)",
+    )
+    parser.add_argument(
+        "--y-pos",
+        type=float,
+        required=True,
+        help="Requested y position (example: 0.19)",
+    )
     args = parser.parse_args()
 
-    data_dir = args.data_dir.expanduser().resolve()
-    if not data_dir.exists():
-        raise FileNotFoundError(f"Data directory not found: {data_dir}")
+    result = analyze_single(x=args.x_pos, y=args.y_pos, data_dir=args.data_dir)
 
-    h5_files = sorted(data_dir.glob("*.h5"))
-    if not h5_files:
-        raise FileNotFoundError(f"No .h5 files found in: {data_dir}")
-
-    csv_dir = data_dir / CSV_DIRNAME
-    graph_dir = data_dir / GRAPH_DIRNAME
-
-    rows: List[Dict[str, object]] = []
-    for path in h5_files:
-        row = summarize_file(path)
-        rows.append(row)
-
-        time, channels, meta = load_h5(path)
-        position_label, _, _ = choose_position(meta, path.stem)
-        save_plot(graph_dir, path, position_label, time, channels)
-
-    csv_path = write_summary_csv(csv_dir, rows)
-
-    print(f"Processed files: {len(h5_files)}")
-    print(f"Summary CSV: {csv_path}")
-    print(f"Graph folder: {graph_dir}")
+    print(f"Selected by position x={args.x_pos:.3f}, y={args.y_pos:.3f}")
+    print(f"Processed file: {result['file']}")
+    print(f"Position label: {result['position_label']}")
+    print(f"Mean A (mV): {result['mean_A_mV']:.6f}")
+    print(f"SNR A (dB): {result['snr_A_dB']:.6f}")
+    print(f"Summary CSV: {result['summary_csv']}")
+    print(f"Graph folder: {result['graph_dir']}")
 
 
 if __name__ == "__main__":
-    main()
+    result = analyze_single(x=1, y=2, data_dir=DEFAULT_DATA_DIR)
+    mean=result["mean_A_mV"]
+    print(mean)
+    print(f"Mean A (mV): {result['mean_A_mV']:.6f}")
+    print(f"Summary CSV: {result['summary_csv']}")
+    # main()

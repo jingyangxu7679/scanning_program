@@ -96,6 +96,38 @@ def build_grid(rows: List[Dict[str, object]], value_key: str):
 	return x_unique, y_unique, grid
 
 
+def trim_grid_edges(
+	x_unique: List[float],
+	y_unique: List[float],
+	grid: np.ndarray,
+	left: int = 2,
+	right: int = 1,
+	top: int = 1,
+	bottom: int = 2,
+) -> Tuple[List[float], List[float], np.ndarray]:
+	"""Trim columns/rows from the grid edges.
+
+	Directions refer to the rendered plot orientation, not raw array order:
+	`save_grid_plot` calls `ax.invert_xaxis()` and uses `origin="upper"`, so
+	increasing x is plotted right-to-left and increasing y is plotted
+	top-to-bottom. That means:
+	  - `left`   removes columns from the end of x_unique/grid (largest x).
+	  - `right`  removes columns from the start of x_unique/grid (smallest x).
+	  - `top`    removes rows from the start of y_unique/grid (smallest y).
+	  - `bottom` removes rows from the end of y_unique/grid (largest y).
+
+	The color magnitude for any plot made from the returned grid will scale
+	automatically to the remaining data, since imshow computes vmin/vmax from
+	whatever array it is given (ignoring NaN cells).
+	"""
+	if len(x_unique) - left - right < 1 or len(y_unique) - top - bottom < 1:
+		raise ValueError("Not enough columns/rows remaining after trimming edges.")
+	x_trimmed = x_unique[right: len(x_unique) - left]
+	y_trimmed = y_unique[top: len(y_unique) - bottom]
+	grid_trimmed = grid[top: len(y_unique) - bottom, right: len(x_unique) - left]
+	return x_trimmed, y_trimmed, grid_trimmed
+
+
 def save_grid_csv(path: Path, x_unique: List[float], y_unique: List[float], grid: np.ndarray) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	with path.open("w", newline="", encoding="utf-8") as f:
@@ -182,12 +214,25 @@ def main() -> None:
 	output_mean_png_b = output_graph_mean_dir / f"{output_prefix}_mean_B_grid.png"
 	output_mean_png_a_novalues = output_graph_mean_dir / f"{output_prefix}_mean_A_grid_no_values.png"
 	output_mean_png_b_novalues = output_graph_mean_dir / f"{output_prefix}_mean_B_grid_no_values.png"
+	output_csv_a_cropped = output_csv_dir / f"{output_prefix}_p2p_A_grid_cropped.csv"
+	output_csv_b_cropped = output_csv_dir / f"{output_prefix}_p2p_B_grid_cropped.csv"
+	output_png_a_cropped = output_graph_dir / f"{output_prefix}_p2p_A_grid_cropped.png"
+	output_png_b_cropped = output_graph_dir / f"{output_prefix}_p2p_B_grid_cropped.png"
+	output_mean_png_a_cropped = output_graph_mean_dir / f"{output_prefix}_mean_A_grid_cropped.png"
+	output_mean_png_b_cropped = output_graph_mean_dir / f"{output_prefix}_mean_B_grid_cropped.png"
+	output_mean_png_a_novalues_cropped = output_graph_mean_dir / f"{output_prefix}_mean_A_grid_no_values_cropped.png"
+	output_mean_png_b_novalues_cropped = output_graph_mean_dir / f"{output_prefix}_mean_B_grid_no_values_cropped.png"
 
 	rows = load_summary_rows(input_csv)
 	x_unique, y_unique, grid_a = build_grid(rows, "p2p_A_mV")
 	_, _, grid_b = build_grid(rows, "p2p_B_mV")
 	_, _, mean_grid_a = build_grid(rows, "mean_A_mV")
 	_, _, mean_grid_b = build_grid(rows, "mean_B_mV")
+
+	x_unique_cropped, y_unique_cropped, grid_a_cropped = trim_grid_edges(x_unique, y_unique, grid_a)
+	_, _, grid_b_cropped = trim_grid_edges(x_unique, y_unique, grid_b)
+	_, _, mean_grid_a_cropped = trim_grid_edges(x_unique, y_unique, mean_grid_a)
+	_, _, mean_grid_b_cropped = trim_grid_edges(x_unique, y_unique, mean_grid_b)
 
 	if np.allclose(grid_b, 0.0, equal_nan=False):
 		print("Warning: Channel B grid is all zeros. This matches your CSV values and is not a plotting bug.")
@@ -247,6 +292,59 @@ def main() -> None:
 		show_values=False,
 	)
 
+	save_grid_csv(output_csv_a_cropped, x_unique_cropped, y_unique_cropped, grid_a_cropped)
+	save_grid_csv(output_csv_b_cropped, x_unique_cropped, y_unique_cropped, grid_b_cropped)
+	save_grid_plot(
+		output_png_a_cropped,
+		x_unique_cropped,
+		y_unique_cropped,
+		grid_a_cropped,
+		title="Channel A Peak-to-Peak Voltage by Spatial Position (Cropped)",
+		cbar_label="P2P Voltage A (mV)",
+	)
+	save_grid_plot(
+		output_png_b_cropped,
+		x_unique_cropped,
+		y_unique_cropped,
+		grid_b_cropped,
+		title="Channel B Peak-to-Peak Voltage by Spatial Position (Cropped)",
+		cbar_label="P2P Voltage B (mV)",
+	)
+	save_grid_plot(
+		output_mean_png_a_cropped,
+		x_unique_cropped,
+		y_unique_cropped,
+		mean_grid_a_cropped,
+		title="Channel A Mean Voltage by Spatial Position (Cropped)",
+		cbar_label="Mean Voltage A (mV)",
+	)
+	save_grid_plot(
+		output_mean_png_b_cropped,
+		x_unique_cropped,
+		y_unique_cropped,
+		mean_grid_b_cropped,
+		title="Channel B Mean Voltage by Spatial Position (Cropped)",
+		cbar_label="Mean Voltage B (mV)",
+	)
+	save_grid_plot(
+		output_mean_png_a_novalues_cropped,
+		x_unique_cropped,
+		y_unique_cropped,
+		mean_grid_a_cropped,
+		title="Channel A Mean Voltage by Spatial Position (Cropped)",
+		cbar_label="Mean Voltage A (mV)",
+		show_values=False,
+	)
+	save_grid_plot(
+		output_mean_png_b_novalues_cropped,
+		x_unique_cropped,
+		y_unique_cropped,
+		mean_grid_b_cropped,
+		title="Channel B Mean Voltage by Spatial Position (Cropped)",
+		cbar_label="Mean Voltage B (mV)",
+		show_values=False,
+	)
+
 	print(f"Loaded {len(rows)} rows from {input_csv}")
 	print(f"Channel A grid CSV written to: {output_csv_a}")
 	print(f"Channel B grid CSV written to: {output_csv_b}")
@@ -256,6 +354,14 @@ def main() -> None:
 	print(f"Channel B mean grid image written to: {output_mean_png_b}")
 	print(f"Channel A mean grid image (no values) written to: {output_mean_png_a_novalues}")
 	print(f"Channel B mean grid image (no values) written to: {output_mean_png_b_novalues}")
+	print(f"Channel A cropped grid CSV written to: {output_csv_a_cropped}")
+	print(f"Channel B cropped grid CSV written to: {output_csv_b_cropped}")
+	print(f"Channel A cropped grid image written to: {output_png_a_cropped}")
+	print(f"Channel B cropped grid image written to: {output_png_b_cropped}")
+	print(f"Channel A cropped mean grid image written to: {output_mean_png_a_cropped}")
+	print(f"Channel B cropped mean grid image written to: {output_mean_png_b_cropped}")
+	print(f"Channel A cropped mean grid image (no values) written to: {output_mean_png_a_novalues_cropped}")
+	print(f"Channel B cropped mean grid image (no values) written to: {output_mean_png_b_novalues_cropped}")
 
 
 if __name__ == "__main__":

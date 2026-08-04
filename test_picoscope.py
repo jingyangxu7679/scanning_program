@@ -214,7 +214,7 @@ def picoscope_block_mode_run(x_pos, y_pos):
         f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.h5"
     )
     # save to Desktop/test_data
-    save_dir = os.path.join(os.path.expanduser("~"), "Desktop", "test_data_04/27/0725_scan2")
+    save_dir = os.path.join(os.path.expanduser("~"), "Desktop", "test_data_04/27/0727_scan2")
     os.makedirs(save_dir, exist_ok=True)
     filepath = os.path.join(save_dir, filename)
     save_recording_hdf5(filepath, time, channels, meta=meta, x_pos=x_pos, y_pos=y_pos)

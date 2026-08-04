@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-DEFAULT_DATA_DIR = Path.home() / "Desktop" / "test_data_04" / "27" / "0725_scan2"
+DEFAULT_DATA_DIR = Path.home() / "Desktop" / "test_data_04" / "27" / "0727_scan2_success"
 CSV_DIRNAME = "CSV"
 GRAPH_DIRNAME = "GRAPH"
 

@@ -8,11 +8,11 @@ Example Description: This example controls the BSC200 series (Using the HDR50/M 
 """
 
 #edited from this example: https://github.com/Thorlabs/Motion_Control_Examples/blob/main/Python/Kinesis/Benchtop/BSC20X/BSC20X_pythonnet.py
-import os
-import time
-import sys
-import csv
 import subprocess
+import os
+import sys
+import time
+import csv
 import clr
 from datetime import datetime, timezone, timedelta
 
@@ -24,55 +24,62 @@ from Thorlabs.MotionControl.DeviceManagerCLI import *
 from Thorlabs.MotionControl.GenericMotorCLI import *
 from Thorlabs.MotionControl.Benchtop.StepperMotorCLI import *
 from System import Decimal  # necessary for real world units
-import creat_grid_file_realtime as rt
-import analyze_0427_singlefile as analyze
-from pathlib import Path
+import test_picoscope
 
 
 initial_pos=0
+initial_pos_X=0
+initial_pos_Y=0
 #initial_pos_Z=1#correspond to 0.1 mm 
 initial_z_focus=3852
 
-# PicoScope captures are run in a separate process (see call site below) because
-# pythonnet hosts the .NET CLR in this process for Thorlabs/Kinesis motor control;
-# calling into the PicoScope SDK's native ctypes calls from the same process caused
-# a fatal "PyEval_RestoreThread ... GIL released" crash.
-PICOSCOPE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_picoscope.py")
+# NOTE: unlike Move_2D_picoscope.py / Move_2D_norealtime's earlier version, this file
+# calls test_picoscope.picoscope_block_mode_run() directly in-process (no subprocess),
+# per explicit request. This re-introduces the risk described in test_picoscope.py:
+# mixing pythonnet's hosted .NET CLR (used here for Thorlabs/Kinesis) with the
+# PicoScope SDK's native ctypes calls in the same process previously caused a fatal
+# "PyEval_RestoreThread ... GIL released" crash. If that crash recurs, revert to the
+# subprocess.run([...]) approach used in Move_2D_picoscope.py.est
 
-# Grid dimensions must match the actual scan ranges used in main():
-# N in range(91) with step_size=0.01     -> x from x_start_pos to x_start_pos + 0.90
-# M in range(31) with y_step_size=0.01   -> y from y_start_pos to y_start_pos + 0.30
-# If these fall out of sync with the loop below, update_realtime_display()
-# will raise ValueError partway through a scan because the position won't
-# be found in the grid's position lists.
-x_start_pos = 1.97  # scan starts at this x position instead of 0.0
-y_start_pos = 2.18  # scan starts at this y position instead of 0.0
-x_positions = rt.generate_positions(x_start_pos, x_start_pos + 0.34, 0.01)
-y_positions = rt.generate_positions(y_start_pos, y_start_pos + 0.16, 0.01)
-DEFAULT_DATA_DIR = Path.home() / "Desktop" / "test_data_04" / "27" / "0727_scan2"
 CSV_DIRNAME = "CSV_single"
 GRAPH_DIRNAME = "GRAPH_single"
+Keysight_N9010A_SCRIPT= os.path.join(os.path.dirname(os.path.abspath(__file__)), "testsaveTrace_keysight.py")
 
 
 
-def shift_zfocus_stage(x_pos, y_pos, x_start_pos, y_start_pos, initial_z_focus):
-    #this function shifts the z axis of 3-axis motorized stage based on pre computed spatial variation of necessary z-focus
-    x_pos_float = float(str(x_pos)) - float(str(x_start_pos))
-    y_pos_float = float(str(y_pos)) - float(str(y_start_pos))
-    z_start_float = float(str(initial_z_focus))
+def shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z):
+    # this function shifts the z axis of 3-axis motorized stage based on pre computed spatial variation of necessary z-focus
+    x_pos_float = float(str(x_pos))
+    y_pos_float = float(str(y_pos))
+    z_start_float = float(str(initial_pos_Z))
     #x_change = (x_pos_float / 1.5) * 0.04
-    x_change = (x_pos_float / 0.1) * 0.005#only change x if greater than 0.5 mm
-    y_change = ((y_pos_float) / 0.04) * 0.002#should be 0.5
+    if x_pos_float < 2.55:
+        x_change = ((x_pos_float - 2.20) / 0.05) * 0.001
+    else:
+        x_change = ((2.55 - 2.20) / 0.05) * 0.001 + ((x_pos_float - 2.55) / 0.05) * 0.0015
+    if y_pos_float < 2.35:
+        y_change = 0.0
+    elif y_pos_float < 2.45:
+        y_change = 0.001
+    elif y_pos_float < 2.55:
+        y_change = 0.002
+    elif y_pos_float < 2.65:
+        y_change = 0.003
+    elif y_pos_float < 2.70:
+        y_change = 0.004
+    else:
+        y_change = 0.005
     #if x_pos_float>0.5:
         #x_change = (x_pos_float / 0.1) * 0.003
     #else:
     #    x_change=0
     #new_z_pos = z_start_float + x_change - y_change
-    new_z_pos = z_start_float - x_change - y_change
+    new_z_pos = z_start_float + x_change + y_change
 
     new_z_pos = Decimal(new_z_pos)
     print(f"Shifting z focus stage to new position: {new_z_pos}")
     return new_z_pos
+
 def main():
 
     # Comment out this line for the real device
@@ -180,60 +187,59 @@ def main():
         print(f"Saving motor position timestamps to: {csv_path}")
         step_size = 0.01  #should correspond to *0.1 mm for the stage
         y_step_size = 0.01
-        # Live grid display runs in its own process so its window stays movable and
-        # responsive even while this process is blocked on motor moves or PicoScope
-        # subprocess calls.
-        display = rt.launch_realtime_display(x_positions, y_positions, channel="A")
+        x_start_pos = float(str(channel.DevicePosition))  # scan starts at this x position instead of 0.0
+        y_start_pos = float(str(channel_2.DevicePosition))  # scan starts at this y position instead of 0.0
+        initial_pos_X = x_start_pos
+        initial_pos_Y = y_start_pos
+        print (f"Initial x position: {initial_pos_X}, Initial y position: {initial_pos_Y}, Initial z position: {initial_pos_Z}")
+        initial_pos_Z = channel_3.DevicePosition
         #time.sleep(1)
         #z_focus_counter=0
         try:
-            for M in range(17):#41
+            for M in range(41):#41
                 print("Moving channel 2...")
                 channel_2.MoveTo(Decimal(y_start_pos + y_step_size*M), 60000)
-                #time.sleep(0.5)
+                #time.sleep(1)
                 print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
 
                 # Zigzag (boustrophedon) scan: alternate x direction every other row so
                 # the stage moves directly from the end of one row to the start of the
                 # next, instead of always jumping all the way back to x_start_pos - this
                 # avoids the large backlash-prone reset jump at the start of every row.
-                x_indices = range(35) if M % 2 == 0 else range(34, -1, -1)
+                x_indices = range(121) if M % 2 == 0 else range(120, -1, -1)#121
                 for N in x_indices:#41
                     channel.MoveTo(Decimal(x_start_pos + step_size*N), 60000)
                     print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
-                    time.sleep(0.5)
+                    #time.sleep(1)
                     x_pos = channel.DevicePosition
                     y_pos = channel_2.DevicePosition
                     print(f"Current x position: {x_pos}, Current y position: {y_pos}")
                     #if N%5==0:
-                    print("Adjust z focus")
-                    #time.sleep(1)
-                    #Control_picometer8742.adjust_focus(x_current=x_pos, y_current=y_pos, initial_pos_X=initial_pos_X, initial_pos_Y=initial_pos_Y, initial_z_focus=initial_z_focus)  # adjust z focus to initial_z_focus (900 steps = 90 um)
-                    if N%5==0: # adjust z focus every 15 steps in x direction (every 1.5 mm)
-                        z_focus_pos=shift_zfocus_stage(x_pos, y_pos, x_start_pos, y_start_pos, initial_pos_Z)
                     
-                        #channel_3.MoveTo(z_focus_pos, 60000)
+                    time.sleep(1)
+                    #Control_picometer8742.adjust_focus(x_current=x_pos, y_current=y_pos, initial_pos_X=initial_pos_X, initial_pos_Y=initial_pos_Y, initial_z_focus=initial_z_focus)  # adjust z focus to initial_z_focus (900 steps = 90 um)
+                    if N%2==0: # adjust z focus every 15 steps in x direction (every 1.5 mm)
+                        z_focus_pos=shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z) 
+                    
+                        channel_3.MoveTo(z_focus_pos, 60000)
                         z_actual = channel_3.DevicePosition
                         z_error = float(str(z_actual)) - float(str(z_focus_pos))
                         print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error}")
-                    #time.sleep(1)
+                    time.sleep(1)#change to 1 later
                     # Convert .NET Decimal device positions to plain Python floats up front -
-                    # needed both as CLI args for the subprocess below and for
-                    # analyze_single/update_realtime_display, which do float formatting/
-                    # arithmetic (e.g. f"{value:.3f}") that raises a TypeError on a raw
-                    # System.Decimal.
+                    # picoscope_block_mode_run's filename/attribute formatting (e.g. f"{value:.3f}")
+                    # raises a TypeError on a raw System.Decimal.
                     x_pos_f = float(str(x_pos))
                     y_pos_f = float(str(y_pos))
 
-                    # Run the PicoScope capture in its own process, isolated from the
-                    # pythonnet CLR hosted here, to avoid the GIL crash described above.
+                    # Capture data via EXA N9010A (currently program is testsaveTrace_keysight.py).
+                    # keysight_ktxsan requires Python 3.10, so this is run via the "py" launcher's
+                    # "-3.10" selector instead of sys.executable (this script itself keeps running
+                    # under whatever interpreter launched Move_2D_1064.py, e.g. Python 3.13).
                     subprocess.run(
-                        [sys.executable, PICOSCOPE_SCRIPT, "--x-pos", str(x_pos_f), "--y-pos", str(y_pos_f)],
-                        check=True,
-                    )
-
-                    value = analyze.analyze_single(x=x_pos_f, y=y_pos_f, data_dir=DEFAULT_DATA_DIR)["mean_A_mV"]
-                    display.update(x_pos_f, y_pos_f, value)  # value = measured mean mV
+                                            ["py", "-3.10", Keysight_N9010A_SCRIPT, "--x-pos", str(x_pos_f), "--y-pos", str(y_pos_f)],
+                                            check=True,
+                                        )
                     timestamp_str = datetime.now(tz_minus_7).strftime("%Y-%m-%d %H:%M:%S")
                     csv_writer.writerow([timestamp_str, str(x_pos), str(y_pos)])#can also store z pos later
                     csv_file.flush()
@@ -246,13 +252,6 @@ def main():
                 N=N+1
         finally:
             csv_file.close()
-            # Save the final real-time grid to its own files. Reusing csv_path here
-            # would silently overwrite the motor position timestamp log written above,
-            # and that variable is a str (no .parent) rather than a Path anyway.
-            grid_csv_path = Path(output_dir) / f"realtime_grid_{run_timestamp}.csv"
-            grid_png_path = Path(output_dir) / f"realtime_grid_{run_timestamp}.png"
-            display.save(grid_csv_path, grid_png_path)
-            display.close()
 
         #Home after moving 
         #channel.Home(60000)

@@ -25,8 +25,6 @@ from Thorlabs.MotionControl.GenericMotorCLI import *
 from Thorlabs.MotionControl.Benchtop.StepperMotorCLI import *
 from System import Decimal  # necessary for real world units
 import test_picoscope
-import create_grid_file_realtime_1064 as rt1064
-from pathlib import Path
 
 
 initial_pos=0
@@ -46,14 +44,6 @@ initial_z_focus=3852
 CSV_DIRNAME = "CSV_single"
 GRAPH_DIRNAME = "GRAPH_single"
 Keysight_N9010A_SCRIPT= os.path.join(os.path.dirname(os.path.abspath(__file__)), "testsaveTrace_keysight.py")
-
-# Folder where testsaveTrace_keysight.py saves its trace CSVs for this run. This
-# must be kept in sync with the `output_file = output_dir / "..." / filename`
-# subfolder name hardcoded in testsaveTrace_keysight.py, otherwise rt1064.analyze_single()
-# below won't find the file that was just captured for the current (x, y) position.
-KEYSIGHT_OUTPUT_DIR = Path.home() / "Desktop" / "Keysight_EXA_N9010A"
-KEYSIGHT_SCAN_SUBDIR = "test2"
-KEYSIGHT_DATA_DIR = KEYSIGHT_OUTPUT_DIR / KEYSIGHT_SCAN_SUBDIR
 
 
 
@@ -205,17 +195,8 @@ def main():
         initial_pos_Z = channel_3.DevicePosition
         #time.sleep(1)
         #z_focus_counter=0
-
-        # Grid dimensions must match the scan loop below: M in range(41) with
-        # y_step_size -> 41 y positions; N in range(121) with step_size -> 121 x
-        # positions. Live grid display runs in its own process so its window
-        # stays movable and responsive even while this process is blocked on
-        # motor moves or the Keysight EXA subprocess call.
-        x_positions = rt1064.generate_positions(x_start_pos, x_start_pos + step_size * 20, step_size)
-        y_positions = rt1064.generate_positions(y_start_pos, y_start_pos + y_step_size * 10, y_step_size)
-        display = rt1064.launch_realtime_display(x_positions, y_positions)
         try:
-            for M in range(11):#41
+            for M in range(41):#41
                 print("Moving channel 2...")
                 channel_2.MoveTo(Decimal(y_start_pos + y_step_size*M), 60000)
                 #time.sleep(1)
@@ -225,8 +206,8 @@ def main():
                 # the stage moves directly from the end of one row to the start of the
                 # next, instead of always jumping all the way back to x_start_pos - this
                 # avoids the large backlash-prone reset jump at the start of every row.
-                x_indices = range(4) if M % 2 == 0 else range(3, -1, -1)#21
-                for N in x_indices:#21
+                x_indices = range(121) if M % 2 == 0 else range(120, -1, -1)#121
+                for N in x_indices:#41
                     channel.MoveTo(Decimal(x_start_pos + step_size*N), 60000)
                     print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
                     #time.sleep(1)
@@ -240,10 +221,10 @@ def main():
                     if N%2==0: # adjust z focus every 15 steps in x direction (every 1.5 mm)
                         z_focus_pos=shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z) 
                     
-                        #channel_3.MoveTo(z_focus_pos, 60000)
-                        #z_actual = channel_3.DevicePosition
-                        #z_error = float(str(z_actual)) - float(str(z_focus_pos))
-                        #print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error}")
+                        channel_3.MoveTo(z_focus_pos, 60000)
+                        z_actual = channel_3.DevicePosition
+                        z_error = float(str(z_actual)) - float(str(z_focus_pos))
+                        print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error}")
                     time.sleep(1)#change to 1 later
                     # Convert .NET Decimal device positions to plain Python floats up front -
                     # picoscope_block_mode_run's filename/attribute formatting (e.g. f"{value:.3f}")
@@ -259,19 +240,6 @@ def main():
                                             ["py", "-3.10", Keysight_N9010A_SCRIPT, "--x-pos", str(x_pos_f), "--y-pos", str(y_pos_f)],
                                             check=True,
                                         )
-
-                    # Find the single trace file just saved for this (x, y) position,
-                    # get its peak frequency (Lorentzian-refined when the fit succeeds,
-                    # otherwise the raw max-amplitude peak), and plot it at the right
-                    # cell in the live grid display.
-                    try:
-                        result = rt1064.analyze_single(x=x_pos_f, y=y_pos_f, data_dir=KEYSIGHT_DATA_DIR)
-                        lorentzian_freq = result["lorentzian_peak_frequency_hz"]
-                        peak_freq = lorentzian_freq if lorentzian_freq is not None else result["peak_frequency_hz"]
-                        display.update(x_pos_f, y_pos_f, peak_freq)
-                    except (FileNotFoundError, ValueError) as exc:
-                        print(f"[realtime display] {exc}")
-
                     timestamp_str = datetime.now(tz_minus_7).strftime("%Y-%m-%d %H:%M:%S")
                     csv_writer.writerow([timestamp_str, str(x_pos), str(y_pos)])#can also store z pos later
                     csv_file.flush()
@@ -284,12 +252,6 @@ def main():
                 N=N+1
         finally:
             csv_file.close()
-            # Save the final real-time grid to its own files, then let the user
-            # close the still-open, still-movable window when they're done.
-            grid_csv_path = Path(output_dir) / f"realtime_grid_1064_{run_timestamp}.csv"
-            grid_png_path = Path(output_dir) / f"realtime_grid_1064_{run_timestamp}.png"
-            display.save(grid_csv_path, grid_png_path)
-            display.close()
 
         #Home after moving 
         #channel.Home(60000)

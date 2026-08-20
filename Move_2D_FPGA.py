@@ -8,9 +8,8 @@ Example Description: This example controls the BSC200 series (Using the HDR50/M 
 """
 
 #edited from this example: https://github.com/Thorlabs/Motion_Control_Examples/blob/main/Python/Kinesis/Benchtop/BSC20X/BSC20X_pythonnet.py
-import subprocess
 import os
-import sys
+import subprocess
 import time
 import csv
 import clr
@@ -25,13 +24,56 @@ from Thorlabs.MotionControl.GenericMotorCLI import *
 from Thorlabs.MotionControl.Benchtop.StepperMotorCLI import *
 from System import Decimal  # necessary for real world units
 import test_picoscope
-import create_grid_file_realtime_1064 as rt1064
-from pathlib import Path
 
+
+#New scanning script code
+import serial, struct, time, csv
+ser = serial.Serial('COM3', 1_000_000, timeout=1.0)
+
+def crc16(d, c=0xFFFF):
+    for b in d:
+        c ^= b << 8
+        for _ in range(8):
+            c = ((c<<1)^0x1021)&0xFFFF if c&0x8000 else (c<<1)&0xFFFF
+    return c
+
+BINHZ = 244_138_308 / 128000.0
+
+FRAMES_PER_PIXEL = 476        # 0.25 s worth at 1907 frames/s
+
+def log_pixel(path, n_frames=FRAMES_PER_PIXEL, timeout_s=2.0):
+    """Collect exactly n_frames packets. Equal integration per pixel
+    regardless of how the OS bunches deliveries."""
+    ser.reset_input_buffer()
+    t0 = time.time()
+    n = 0
+    with open(path, 'w', newline='') as fh:
+        w = csv.writer(fh)
+        w.writerow(['timestamp', 'f0_hz', 'f0_mag', 'f0_ok'])
+        while n < n_frames:
+            if time.time() - t0 > timeout_s:
+                print(f'  timeout: {n}/{n_frames} frames')
+                break
+            if not ser.read_until(b'\xAA\x55').endswith(b'\xAA\x55'):
+                continue
+            r = ser.read(9)
+            if len(r) < 9 or ((r[7] << 8) | r[8]) != crc16(r[:7]):
+                continue
+            b   = struct.unpack_from('<H', r, 1)[0]
+            off = struct.unpack_from('<h', r, 3)[0]
+            mag = struct.unpack_from('<H', r, 5)[0]
+            w.writerow([f'{time.time():.6f}',
+                        f'{(b + off/32768.0)*BINHZ:.3f}',
+                        mag, int(r[0] & 1)])
+            n += 1
+        el = time.time() - t0
+        print(f'  FPGA: {n} frames in {el:.3f}s')
+
+    return n
 
 initial_pos=0
-initial_pos_X=0
-initial_pos_Y=0
+initial_pos_X=2.2
+initial_pos_Y=2.2
 #initial_pos_Z=1#correspond to 0.1 mm 
 initial_z_focus=3852
 
@@ -41,19 +83,11 @@ initial_z_focus=3852
 # mixing pythonnet's hosted .NET CLR (used here for Thorlabs/Kinesis) with the
 # PicoScope SDK's native ctypes calls in the same process previously caused a fatal
 # "PyEval_RestoreThread ... GIL released" crash. If that crash recurs, revert to the
-# subprocess.run([...]) approach used in Move_2D_picoscope.py.est
+# subprocess.run([...]) approach used in Move_2D_picoscope.py.
 
-CSV_DIRNAME = "CSV_single"
-GRAPH_DIRNAME = "GRAPH_single"
-Keysight_N9010A_SCRIPT= os.path.join(os.path.dirname(os.path.abspath(__file__)), "testsaveTrace_keysight.py")
-
-# Folder where testsaveTrace_keysight.py saves its trace CSVs for this run. This
-# must be kept in sync with the `output_file = output_dir / "..." / filename`
-# subfolder name hardcoded in testsaveTrace_keysight.py, otherwise rt1064.analyze_single()
-# below won't find the file that was just captured for the current (x, y) position.
-KEYSIGHT_OUTPUT_DIR = Path.home() / "Desktop" / "Keysight_EXA_N9010A"
-KEYSIGHT_SCAN_SUBDIR = "reduceTime_0813"
-KEYSIGHT_DATA_DIR = KEYSIGHT_OUTPUT_DIR / KEYSIGHT_SCAN_SUBDIR
+# FPGA_PLOT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fpga", "plot_multi_timed.py")
+FPGA_LOG_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "FPGA_scan_data", "08_18_test6_frames")
+os.makedirs(FPGA_LOG_DIR, exist_ok=True)
 
 
 
@@ -63,7 +97,9 @@ def shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z
     y_pos_float = float(str(y_pos))
     z_start_float = float(str(initial_pos_Z))
     #x_change = (x_pos_float / 1.5) * 0.04
-    if x_pos_float < 2.55:
+    if x_pos_float < 2.20:
+        x_change = 0.0
+    elif x_pos_float < 2.55:
         x_change = ((x_pos_float - 2.20) / 0.05) * 0.001
     else:
         x_change = ((2.55 - 2.20) / 0.05) * 0.001 + ((x_pos_float - 2.55) / 0.05) * 0.0015
@@ -182,19 +218,6 @@ def main():
         # Use the live z position as the baseline so focus offsets are referenced to real device coordinates.
         initial_pos_Z = channel_3.DevicePosition
         print(f"Initial z baseline position: {initial_pos_Z}")
-
-        output_dir = os.path.join(os.path.expanduser("~"), "Desktop", "motor_pos_time")
-        os.makedirs(output_dir, exist_ok=True)
-        run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        csv_filename = f"motor_pos_time_{run_timestamp}.csv"
-        csv_path = os.path.join(output_dir, csv_filename)
-
-        tz_minus_7 = timezone(timedelta(hours=-7))
-
-        csv_file = open(csv_path, "w", newline="", encoding="utf-8")
-        csv_writer = csv.writer(csv_file)
-        csv_writer.writerow(["Time (UTC -07:00 yyyy-MM-dd HH:mm:ss)", "x_pos", " y_pos"])
-        print(f"Saving motor position timestamps to: {csv_path}")
         step_size = 0.01  #should correspond to *0.1 mm for the stage
         y_step_size = 0.01
         x_start_pos = float(str(channel.DevicePosition))  # scan starts at this x position instead of 0.0
@@ -205,17 +228,8 @@ def main():
         initial_pos_Z = channel_3.DevicePosition
         #time.sleep(1)
         #z_focus_counter=0
-
-        # Grid dimensions must match the scan loop below: M in range(41) with
-        # y_step_size -> 41 y positions; N in range(121) with step_size -> 121 x
-        # positions. Live grid display runs in its own process so its window
-        # stays movable and responsive even while this process is blocked on
-        # motor moves or the Keysight EXA subprocess call.
-        x_positions = rt1064.generate_positions(x_start_pos, x_start_pos + step_size * 20, step_size)
-        y_positions = rt1064.generate_positions(y_start_pos, y_start_pos + y_step_size * 10, y_step_size)
-        display = rt1064.launch_realtime_display(x_positions, y_positions)
         try:
-            for M in range(11):#41
+            for M in range(41):#41
                 print("Moving channel 2...")
                 channel_2.MoveTo(Decimal(y_start_pos + y_step_size*M), 60000)
                 #time.sleep(1)
@@ -225,8 +239,8 @@ def main():
                 # the stage moves directly from the end of one row to the start of the
                 # next, instead of always jumping all the way back to x_start_pos - this
                 # avoids the large backlash-prone reset jump at the start of every row.
-                x_indices = range(21) if M % 2 == 0 else range(20, -1, -1)#21
-                for N in x_indices:#21
+                x_indices = range(121) if M % 2 == 0 else range(120, -1, -1)#121
+                for N in x_indices:#41
                     channel.MoveTo(Decimal(x_start_pos + step_size*N), 60000)
                     print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
                     #time.sleep(1)
@@ -234,47 +248,36 @@ def main():
                     y_pos = channel_2.DevicePosition
                     print(f"Current x position: {x_pos}, Current y position: {y_pos}")
                     #if N%5==0:
-                    
+                    print("Adjust z focus")
                     #time.sleep(1)
                     #Control_picometer8742.adjust_focus(x_current=x_pos, y_current=y_pos, initial_pos_X=initial_pos_X, initial_pos_Y=initial_pos_Y, initial_z_focus=initial_z_focus)  # adjust z focus to initial_z_focus (900 steps = 90 um)
-                    if N%2==0: # adjust z focus every 15 steps in x direction (every 1.5 mm)
+                    if N%5==0: # adjust z focus every 15 steps in x direction (every 1.5 mm)
                         z_focus_pos=shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z) 
                     
                         channel_3.MoveTo(z_focus_pos, 60000)
                         z_actual = channel_3.DevicePosition
                         z_error = float(str(z_actual)) - float(str(z_focus_pos))
                         print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error}")
-                    time.sleep(1)#change to 1 later
+                    time.sleep(0.1)
                     # Convert .NET Decimal device positions to plain Python floats up front -
                     # picoscope_block_mode_run's filename/attribute formatting (e.g. f"{value:.3f}")
                     # raises a TypeError on a raw System.Decimal.
                     x_pos_f = float(str(x_pos))
                     y_pos_f = float(str(y_pos))
 
-                    # Capture data via EXA N9010A (currently program is testsaveTrace_keysight.py).
-                    # keysight_ktxsan requires Python 3.10, so this is run via the "py" launcher's
-                    # "-3.10" selector instead of sys.executable (this script itself keeps running
-                    # under whatever interpreter launched Move_2D_1064.py, e.g. Python 3.13).
-                    subprocess.run(
-                                            ["py", "-3.10", Keysight_N9010A_SCRIPT, "--x-pos", str(x_pos_f), "--y-pos", str(y_pos_f)],
-                                            check=True,
-                                        )
+                    # Run the PicoScope capture directly in this process (no subprocess).
+                    #test_picoscope.picoscope_block_mode_run(x_pos=x_pos_f, y_pos=y_pos_f)
 
-                    # Find the single trace file just saved for this (x, y) position,
-                    # get its peak frequency (Lorentzian-refined when the fit succeeds,
-                    # otherwise the raw max-amplitude peak), and plot it at the right
-                    # cell in the live grid display.
-                    try:
-                        result = rt1064.analyze_single(x=x_pos_f, y=y_pos_f, data_dir=KEYSIGHT_DATA_DIR)
-                        lorentzian_freq = result["lorentzian_peak_frequency_hz"]
-                        peak_freq = lorentzian_freq if lorentzian_freq is not None else result["peak_frequency_hz"]
-                        display.update(x_pos_f, y_pos_f, peak_freq)
-                    except (FileNotFoundError, ValueError) as exc:
-                        print(f"[realtime display] {exc}")
+                    # Capture data via the FPGA multi-peak readout, logging to a CSV named
+                    # after this grid position instead of the doc example's fixed "run.csv".
+                    fpga_log_path = os.path.join(FPGA_LOG_DIR, f"fpga_data_x{x_pos_f:.4f}_y{y_pos_f:.4f}.csv")
+                    
+                    log_pixel(fpga_log_path, 476) #about 0.25s
+                    # subprocess.run(
+                    #     ["py", "-3.13", FPGA_PLOT_SCRIPT, "--peaks", "1", "--window", "4000", "--log", fpga_log_path],
+                    #     check=True,
+                    # )
 
-                    timestamp_str = datetime.now(tz_minus_7).strftime("%Y-%m-%d %H:%M:%S")
-                    csv_writer.writerow([timestamp_str, str(x_pos), str(y_pos)])#can also store z pos later
-                    csv_file.flush()
                     #time.sleep(1)
 
                     N=N+1
@@ -283,14 +286,7 @@ def main():
                 #time.sleep(1)
                 N=N+1
         finally:
-            csv_file.close()
-            # Save the final real-time grid to its own files, then let the user
-            # close the still-open, still-movable window when they're done.
-            grid_csv_path = Path(output_dir) / f"realtime_grid_1064_{run_timestamp}.csv"
-            grid_png_path = Path(output_dir) / f"realtime_grid_1064_{run_timestamp}.png"
-            display.save(grid_csv_path, grid_png_path)
-            display.close()
-
+            ser.close()
         #Home after moving 
         #channel.Home(60000)
         #channel_2.Home(60000)

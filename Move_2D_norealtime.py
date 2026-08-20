@@ -26,8 +26,8 @@ import test_picoscope
 
 
 initial_pos=0
-initial_pos_X=0
-initial_pos_Y=0
+initial_pos_X=2.2
+initial_pos_Y=2.2
 #initial_pos_Z=1#correspond to 0.1 mm 
 initial_z_focus=3852
 
@@ -45,23 +45,38 @@ GRAPH_DIRNAME = "GRAPH_single"
 
 
 def shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z):
-    #this function shifts the z axis of 3-axis motorized stage based on pre computed spatial variation of necessary z-focus
+    # this function shifts the z axis of 3-axis motorized stage based on pre computed spatial variation of necessary z-focus
     x_pos_float = float(str(x_pos))
     y_pos_float = float(str(y_pos))
     z_start_float = float(str(initial_pos_Z))
     #x_change = (x_pos_float / 1.5) * 0.04
-    x_change = (x_pos_float / 0.1) * 0.005#only change x if greater than 0.5 mm
-    y_change = ((y_pos_float) / 0.04) * 0.002#should be 0.5
+    if x_pos_float < 2.55:
+        x_change = ((x_pos_float - 2.20) / 0.05) * 0.001
+    else:
+        x_change = ((2.55 - 2.20) / 0.05) * 0.001 + ((x_pos_float - 2.55) / 0.05) * 0.0015
+    if y_pos_float < 2.35:
+        y_change = 0.0
+    elif y_pos_float < 2.45:
+        y_change = 0.001
+    elif y_pos_float < 2.55:
+        y_change = 0.002
+    elif y_pos_float < 2.65:
+        y_change = 0.003
+    elif y_pos_float < 2.70:
+        y_change = 0.004
+    else:
+        y_change = 0.005
     #if x_pos_float>0.5:
         #x_change = (x_pos_float / 0.1) * 0.003
     #else:
     #    x_change=0
     #new_z_pos = z_start_float + x_change - y_change
-    new_z_pos = z_start_float - x_change - y_change
+    new_z_pos = z_start_float + x_change + y_change
 
     new_z_pos = Decimal(new_z_pos)
     print(f"Shifting z focus stage to new position: {new_z_pos}")
     return new_z_pos
+
 def main():
 
     # Comment out this line for the real device
@@ -178,7 +193,7 @@ def main():
         #time.sleep(1)
         #z_focus_counter=0
         try:
-            for M in range(5):#41
+            for M in range(11):#41
                 print("Moving channel 2...")
                 channel_2.MoveTo(Decimal(y_start_pos + y_step_size*M), 60000)
                 #time.sleep(1)
@@ -188,7 +203,7 @@ def main():
                 # the stage moves directly from the end of one row to the start of the
                 # next, instead of always jumping all the way back to x_start_pos - this
                 # avoids the large backlash-prone reset jump at the start of every row.
-                x_indices = range(11) if M % 2 == 0 else range(10, -1, -1)
+                x_indices = range(21) if M % 2 == 0 else range(20, -1, -1)
                 for N in x_indices:#41
                     channel.MoveTo(Decimal(x_start_pos + step_size*N), 60000)
                     print(f"Channel 1 position changed. Position = {channel.DevicePosition}")

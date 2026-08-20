@@ -46,7 +46,7 @@ def main():
     start_freq_hz = 65000   # e.g. 1e6 for 1 MHz
     stop_freq_hz = 73000    # e.g. 100e6 for 100 MHz
     # Number of sweep points to record. Set to None to leave unchanged.
-    num_sweep_points = 99900  # originally 99900
+    num_sweep_points = 5000  # originally 99900
     # Resolution bandwidth (RBW) in Hz. Set to None to leave RBW auto-coupled
     # (instrument picks RBW automatically based on span) instead of overriding it.
     resolution_bandwidth_hz = 1  # e.g. 10 for 10 Hz RBW
@@ -58,7 +58,7 @@ def main():
         filename = "ONtrace_data_x{:.4f}_y{:.4f}_{}.csv".format(args.x_pos, args.y_pos, timestamp)
     else:
         filename = "ONtrace_data_{}.csv".format(timestamp)
-    output_file = output_dir / "test2" / filename
+    output_file = output_dir / "reduceTime_0813" / filename
     output_file.parent.mkdir(parents=True, exist_ok=True)
     acquisition_timeout_s = 10.0
 

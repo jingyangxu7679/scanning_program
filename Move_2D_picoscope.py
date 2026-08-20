@@ -183,6 +183,12 @@ def main():
         # Live grid display runs in its own process so its window stays movable and
         # responsive even while this process is blocked on motor moves or PicoScope
         # subprocess calls.
+        x_start_pos=channel.DevicePosition
+        y_start_pos=channel_2.DevicePosition
+        x_positions = rt.generate_positions(x_start_pos, x_start_pos + 0.34, 0.01)
+        y_positions = rt.generate_positions(y_start_pos, y_start_pos + 0.16, 0.01)
+        
+
         display = rt.launch_realtime_display(x_positions, y_positions, channel="A")
         #time.sleep(1)
         #z_focus_counter=0

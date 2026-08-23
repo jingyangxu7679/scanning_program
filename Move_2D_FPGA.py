@@ -27,7 +27,10 @@ import test_picoscope
 
 
 #New scanning script code
+import io
+import zipfile
 import serial, struct, time, csv
+import numpy as np
 ser = serial.Serial('COM3', 1_000_000, timeout=1.0)
 
 def crc16(d, c=0xFFFF):
@@ -41,53 +44,60 @@ BINHZ = 244_138_308 / 128000.0
 
 FRAMES_PER_PIXEL = 476        # 0.25 s worth at 1907 frames/s
 
-def log_pixel(path, n_frames=FRAMES_PER_PIXEL, timeout_s=2.0):
-    """Collect exactly n_frames packets. Equal integration per pixel
-    regardless of how the OS bunches deliveries."""
+FRAME_DTYPE = np.dtype([
+    ('timestamp', 'f8'),
+    ('f0_hz', 'f8'),
+    ('f0_mag', 'u2'),
+    ('f0_ok', 'u1'),
+])
+
+def log_pixel(n_frames=FRAMES_PER_PIXEL, timeout_s=2.0):
+    """Collect exactly n_frames packets and return them as a structured numpy array.
+    Equal integration per pixel regardless of how the OS bunches deliveries."""
     ser.reset_input_buffer()
     t0 = time.time()
+    rows = np.zeros(n_frames, dtype=FRAME_DTYPE)
     n = 0
-    with open(path, 'w', newline='') as fh:
-        w = csv.writer(fh)
-        w.writerow(['timestamp', 'f0_hz', 'f0_mag', 'f0_ok'])
-        while n < n_frames:
-            if time.time() - t0 > timeout_s:
-                print(f'  timeout: {n}/{n_frames} frames')
-                break
-            if not ser.read_until(b'\xAA\x55').endswith(b'\xAA\x55'):
-                continue
-            r = ser.read(9)
-            if len(r) < 9 or ((r[7] << 8) | r[8]) != crc16(r[:7]):
-                continue
-            b   = struct.unpack_from('<H', r, 1)[0]
-            off = struct.unpack_from('<h', r, 3)[0]
-            mag = struct.unpack_from('<H', r, 5)[0]
-            w.writerow([f'{time.time():.6f}',
-                        f'{(b + off/32768.0)*BINHZ:.3f}',
-                        mag, int(r[0] & 1)])
-            n += 1
-        el = time.time() - t0
-        print(f'  FPGA: {n} frames in {el:.3f}s')
+    while n < n_frames:
+        if time.time() - t0 > timeout_s:
+            print(f'  timeout: {n}/{n_frames} frames')
+            break
+        if not ser.read_until(b'\xAA\x55').endswith(b'\xAA\x55'):
+            continue
+        r = ser.read(9)
+        if len(r) < 9 or ((r[7] << 8) | r[8]) != crc16(r[:7]):
+            continue
+        b   = struct.unpack_from('<H', r, 1)[0]
+        off = struct.unpack_from('<h', r, 3)[0]
+        mag = struct.unpack_from('<H', r, 5)[0]
+        rows[n] = (time.time(), (b + off/32768.0)*BINHZ, mag, int(r[0] & 1))
+        n += 1
+    el = time.time() - t0
+    print(f'  FPGA: {n} frames in {el:.3f}s')
 
-    return n
+    return rows[:n]
+
+
+def save_pixel_to_archive(archive, frames, x_pos, y_pos):
+    """Append one pixel's frame array and its (x, y) position as two .npy entries
+    to the already-open zip archive, so the whole scan ends up in one .npz file."""
+    entry_name = f"x{x_pos:.4f}_y{y_pos:.4f}"
+    position = np.array([x_pos, y_pos], dtype='f8')
+    for suffix, array in (('.frames.npy', frames), ('.position.npy', position)):
+        buf = io.BytesIO()
+        np.save(buf, array)
+        archive.writestr(entry_name + suffix, buf.getvalue())
 
 initial_pos=0
 initial_pos_X=2.2
 initial_pos_Y=2.2
-#initial_pos_Z=1#correspond to 0.1 mm 
 initial_z_focus=3852
 
-# NOTE: unlike Move_2D_picoscope.py / Move_2D_norealtime's earlier version, this file
-# calls test_picoscope.picoscope_block_mode_run() directly in-process (no subprocess),
-# per explicit request. This re-introduces the risk described in test_picoscope.py:
-# mixing pythonnet's hosted .NET CLR (used here for Thorlabs/Kinesis) with the
-# PicoScope SDK's native ctypes calls in the same process previously caused a fatal
-# "PyEval_RestoreThread ... GIL released" crash. If that crash recurs, revert to the
-# subprocess.run([...]) approach used in Move_2D_picoscope.py.
 
 # FPGA_PLOT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fpga", "plot_multi_timed.py")
-FPGA_LOG_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "FPGA_scan_data", "08_18_test6_frames")
+FPGA_LOG_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "FPGA_scan_data", "08_22_test5_frames_476")
 os.makedirs(FPGA_LOG_DIR, exist_ok=True)
+FPGA_SCAN_ARCHIVE_PATH = os.path.join(FPGA_LOG_DIR, "scan_data.npz")
 
 
 
@@ -218,7 +228,7 @@ def main():
         # Use the live z position as the baseline so focus offsets are referenced to real device coordinates.
         initial_pos_Z = channel_3.DevicePosition
         print(f"Initial z baseline position: {initial_pos_Z}")
-        step_size = 0.01  #should correspond to *0.1 mm for the stage
+        step_size = 0.01  #should correspond to mm for the stage
         y_step_size = 0.01
         x_start_pos = float(str(channel.DevicePosition))  # scan starts at this x position instead of 0.0
         y_start_pos = float(str(channel_2.DevicePosition))  # scan starts at this y position instead of 0.0
@@ -228,21 +238,27 @@ def main():
         initial_pos_Z = channel_3.DevicePosition
         #time.sleep(1)
         #z_focus_counter=0
+        # Kept open for the whole scan so every pixel is appended without reopening the file.
+        scan_archive = zipfile.ZipFile(FPGA_SCAN_ARCHIVE_PATH, mode='w', compression=zipfile.ZIP_STORED, allowZip64=True)
         try:
             for M in range(41):#41
+                t_row_start = time.time()
                 print("Moving channel 2...")
+                t0 = time.time()
                 channel_2.MoveTo(Decimal(y_start_pos + y_step_size*M), 60000)
                 #time.sleep(1)
-                print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
+                print(f"Channel 2 position changed. Position = {channel_2.DevicePosition} [MoveTo y took {time.time()-t0:.4f}s]")
 
                 # Zigzag (boustrophedon) scan: alternate x direction every other row so
                 # the stage moves directly from the end of one row to the start of the
                 # next, instead of always jumping all the way back to x_start_pos - this
                 # avoids the large backlash-prone reset jump at the start of every row.
                 x_indices = range(121) if M % 2 == 0 else range(120, -1, -1)#121
-                for N in x_indices:#41
+                for N in x_indices:#121
+                    t_pixel_start = time.time()
+                    t0 = time.time()
                     channel.MoveTo(Decimal(x_start_pos + step_size*N), 60000)
-                    print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
+                    print(f"Channel 1 position changed. Position = {channel.DevicePosition} [MoveTo x took {time.time()-t0:.4f}s]")
                     #time.sleep(1)
                     x_pos = channel.DevicePosition
                     y_pos = channel_2.DevicePosition
@@ -251,14 +267,15 @@ def main():
                     print("Adjust z focus")
                     #time.sleep(1)
                     #Control_picometer8742.adjust_focus(x_current=x_pos, y_current=y_pos, initial_pos_X=initial_pos_X, initial_pos_Y=initial_pos_Y, initial_z_focus=initial_z_focus)  # adjust z focus to initial_z_focus (900 steps = 90 um)
-                    if N%5==0: # adjust z focus every 15 steps in x direction (every 1.5 mm)
+                    t0 = time.time()
+                    if N%5==0: # adjust z focus every 5 steps in x direction (every 1.5 mm)
                         z_focus_pos=shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z) 
                     
                         channel_3.MoveTo(z_focus_pos, 60000)
                         z_actual = channel_3.DevicePosition
                         z_error = float(str(z_actual)) - float(str(z_focus_pos))
-                        print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error}")
-                    time.sleep(0.1)
+                        print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error} [z focus took {time.time()-t0:.4f}s]")
+                    #time.sleep(0.1)
                     # Convert .NET Decimal device positions to plain Python floats up front -
                     # picoscope_block_mode_run's filename/attribute formatting (e.g. f"{value:.3f}")
                     # raises a TypeError on a raw System.Decimal.
@@ -268,11 +285,14 @@ def main():
                     # Run the PicoScope capture directly in this process (no subprocess).
                     #test_picoscope.picoscope_block_mode_run(x_pos=x_pos_f, y_pos=y_pos_f)
 
-                    # Capture data via the FPGA multi-peak readout, logging to a CSV named
-                    # after this grid position instead of the doc example's fixed "run.csv".
-                    fpga_log_path = os.path.join(FPGA_LOG_DIR, f"fpga_data_x{x_pos_f:.4f}_y{y_pos_f:.4f}.csv")
-                    
-                    log_pixel(fpga_log_path, 476) #about 0.25s
+                    # Capture data via the FPGA multi-peak readout and append it (with its
+                    # position) to the single scan-wide archive instead of one CSV per pixel.
+                    t0 = time.time()
+                    frames = log_pixel(476) #about 0.25s
+                    print(f"  log_pixel took {time.time()-t0:.4f}s")
+                    t0 = time.time()
+                    save_pixel_to_archive(scan_archive, frames, x_pos_f, y_pos_f)
+                    print(f"  save_pixel_to_archive took {time.time()-t0:.4f}s")
                     # subprocess.run(
                     #     ["py", "-3.13", FPGA_PLOT_SCRIPT, "--peaks", "1", "--window", "4000", "--log", fpga_log_path],
                     #     check=True,
@@ -280,12 +300,15 @@ def main():
 
                     #time.sleep(1)
 
+                    print(f"  Total pixel time: {time.time()-t_pixel_start:.4f}s")
                     N=N+1
                 
 
                 #time.sleep(1)
+                print(f"Total row {M} time: {time.time()-t_row_start:.4f}s")
                 N=N+1
         finally:
+            scan_archive.close()
             ser.close()
         #Home after moving 
         #channel.Home(60000)

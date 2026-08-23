@@ -1,96 +1,74 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Iterator, List, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 
 FPGA_LOG_DIR = Path.home() / "Desktop" / "FPGA_scan_data" / "08_22_test5_frames_476"
+DEFAULT_ARCHIVE_PATH = FPGA_LOG_DIR / "scan_data.npz"
 DEFAULT_OUTPUT_GRAPH_DIR = FPGA_LOG_DIR / "Grid_graphs"
 DEFAULT_OUTPUT_FREQTIME_DIR = FPGA_LOG_DIR / "frequencyVStime"
 
-# Matches the fpga_data_x{x:.4f}_y{y:.4f}.csv filenames written by Move_2D_FPGA.py
-FILENAME_RE = re.compile(r"fpga_data_x([-+]?\d*\.?\d+)_y([-+]?\d*\.?\d+)\.csv$")
+# Move_2D_FPGA.py writes one .npz archive per scan, with two entries per pixel:
+# "x<x>_y<y>.frames" (structured array with a timestamp field and one or more
+# *_hz fields) and "x<x>_y<y>.position" (the [x, y] position as a float pair).
+FRAMES_SUFFIX = ".frames"
+POSITION_SUFFIX = ".position"
 
 
-def _to_float(value: object) -> float:
-    if value is None:
-        raise ValueError("Missing numeric value")
-    text = str(value).strip()
-    if not text:
-        raise ValueError("Missing numeric value")
-    return float(text)
+def _iter_archive_entries(archive: np.lib.npyio.NpzFile) -> Iterator[Tuple[float, float, np.ndarray]]:
+    """Yield (x_pos, y_pos, frames) for every pixel stored in the scan archive."""
+    bases = sorted({name[: -len(FRAMES_SUFFIX)] for name in archive.files if name.endswith(FRAMES_SUFFIX)})
+    for base in bases:
+        frames = archive[base + FRAMES_SUFFIX]
+        position = archive[base + POSITION_SUFFIX]
+        yield float(position[0]), float(position[1]), frames
 
 
-def parse_position_from_filename(path: Path) -> Tuple[float, float]:
-    match = FILENAME_RE.search(path.name)
-    if not match:
-        raise ValueError(f"Filename does not match fpga_data_x<x>_y<y>.csv pattern: {path.name}")
-    return float(match.group(1)), float(match.group(2))
+def compute_frequency_stats(frames: np.ndarray) -> Dict[str, Dict[str, float]]:
+    """Compute the mean, median and RMS of every *_hz field in one pixel's frame array."""
+    freq_cols = [name for name in (frames.dtype.names or ()) if name.endswith("_hz")]
+    if not freq_cols:
+        raise ValueError("No *_hz frequency field found in frame array")
 
-
-def compute_frequency_stats(path: Path) -> Dict[str, Dict[str, float]]:
-    """Read one FPGA log CSV (as written by plot_multi_timed.py) and compute the mean and median of every f{p}_hz column."""
-    with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        freq_cols = [name for name in (reader.fieldnames or []) if name.endswith("_hz")]
-        if not freq_cols:
-            raise ValueError(f"No *_hz frequency column found in: {path}")
-        values: Dict[str, List[float]] = {name: [] for name in freq_cols}
-        for row in reader:
-            for name in freq_cols:
-                value = row.get(name)
-                if value in (None, ""):
-                    continue
-                values[name].append(_to_float(value))
-
-    return {
-        name: {
+    stats: Dict[str, Dict[str, float]] = {}
+    for name in freq_cols:
+        vals = frames[name].astype(float)
+        if vals.size == 0:
+            continue
+        stats[name] = {
             "mean": float(np.mean(vals)),
             "median": float(np.median(vals)),
             "rms": float(np.sqrt(np.mean(np.square(vals)))),
         }
-        for name, vals in values.items()
-        if vals
-    }
+    return stats
 
 
-def collect_frequency_stats(input_dir: Path) -> Tuple[Dict[Tuple[float, float], Dict[str, Dict[str, float]]], List[str]]:
+def collect_frequency_stats(archive_path: Path) -> Tuple[Dict[Tuple[float, float], Dict[str, Dict[str, float]]], List[str]]:
     points: Dict[Tuple[float, float], Dict[str, Dict[str, float]]] = {}
     freq_col_names: List[str] = []
-    for path in sorted(input_dir.glob("fpga_data_x*_y*.csv")):
-        x_val, y_val = parse_position_from_filename(path)
-        stats = compute_frequency_stats(path)
-        for name in stats:
-            if name not in freq_col_names:
-                freq_col_names.append(name)
-        points[(round(x_val, 10), round(y_val, 10))] = stats
+    with np.load(archive_path) as archive:
+        for x_val, y_val, frames in _iter_archive_entries(archive):
+            stats = compute_frequency_stats(frames)
+            for name in stats:
+                if name not in freq_col_names:
+                    freq_col_names.append(name)
+            points[(round(x_val, 10), round(y_val, 10))] = stats
 
     if not points:
-        raise FileNotFoundError(f"No fpga_data_x*_y*.csv files found in: {input_dir}")
+        raise FileNotFoundError(f"No pixel entries found in: {archive_path}")
     return points, freq_col_names
 
 
-def load_time_series(path: Path) -> Tuple[List[float], Dict[str, List[float]]]:
-    """Read one FPGA log CSV's raw timestamp and f{p}_hz columns in row order."""
-    with path.open("r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
-        freq_cols = [name for name in (reader.fieldnames or []) if name.endswith("_hz")]
-        timestamps: List[float] = []
-        series: Dict[str, List[float]] = {name: [] for name in freq_cols}
-        for row in reader:
-            ts = row.get("timestamp")
-            if ts in (None, ""):
-                continue
-            timestamps.append(_to_float(ts))
-            for name in freq_cols:
-                value = row.get(name)
-                series[name].append(_to_float(value) if value not in (None, "") else float("nan"))
+def load_time_series(frames: np.ndarray) -> Tuple[List[float], Dict[str, List[float]]]:
+    """Pull one pixel's raw timestamp and *_hz fields, in frame order, out of its frame array."""
+    freq_cols = [name for name in (frames.dtype.names or ()) if name.endswith("_hz")]
+    timestamps = frames["timestamp"].astype(float).tolist()
+    series = {name: frames[name].astype(float).tolist() for name in freq_cols}
     return timestamps, series
 
 
@@ -117,13 +95,13 @@ def save_freq_vs_time_plot(
     plt.close(fig)
 
 
-def generate_freq_vs_time_plots(input_dir: Path, output_dir: Path) -> None:
-    for path in sorted(input_dir.glob("fpga_data_x*_y*.csv")):
-        x_pos, y_pos = parse_position_from_filename(path)
-        times, series = load_time_series(path)
-        for freq_col, freq_values in series.items():
-            output_png = output_dir / f"freqVsTime_x{x_pos:.4f}_y{y_pos:.4f}_{freq_col}.png"
-            save_freq_vs_time_plot(output_png, times, freq_values, freq_col, x_pos, y_pos)
+def generate_freq_vs_time_plots(archive_path: Path, output_dir: Path) -> None:
+    with np.load(archive_path) as archive:
+        for x_pos, y_pos, frames in _iter_archive_entries(archive):
+            times, series = load_time_series(frames)
+            for freq_col, freq_values in series.items():
+                output_png = output_dir / f"freqVsTime_x{x_pos:.4f}_y{y_pos:.4f}_{freq_col}.png"
+                save_freq_vs_time_plot(output_png, times, freq_values, freq_col, x_pos, y_pos)
 
 
 def build_grid(points: Dict[Tuple[float, float], Dict[str, Dict[str, float]]], freq_col: str, stat_key: str):
@@ -186,17 +164,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Grid-plot the average FPGA peak frequency of each scan position."
     )
-    parser.add_argument("--input-dir", type=Path, default=FPGA_LOG_DIR, help="Folder containing fpga_data_x<x>_y<y>.csv files")
+    parser.add_argument("--archive-path", type=Path, default=DEFAULT_ARCHIVE_PATH, help="Path to the scan_data.npz archive written by Move_2D_FPGA.py")
     parser.add_argument("--output-graph-dir", type=Path, default=DEFAULT_OUTPUT_GRAPH_DIR, help="Folder for generated grid graph images")
     parser.add_argument("--output-freqtime-dir", type=Path, default=DEFAULT_OUTPUT_FREQTIME_DIR, help="Folder for generated frequency-vs-time images")
     args = parser.parse_args()
 
-    input_dir = args.input_dir
+    archive_path = args.archive_path
     output_graph_dir = args.output_graph_dir
     output_freqtime_dir = args.output_freqtime_dir
 
-    points, freq_cols = collect_frequency_stats(input_dir)
-    print(f"Loaded {len(points)} position(s) from {input_dir}")
+    points, freq_cols = collect_frequency_stats(archive_path)
+    print(f"Loaded {len(points)} position(s) from {archive_path}")
 
     mean_outlier_threshold_hz = 100000.0
 
@@ -242,7 +220,7 @@ def main() -> None:
         )
         print(f"{freq_col} rms grid image written to: {output_rms_png}")
 
-    generate_freq_vs_time_plots(input_dir, output_freqtime_dir)
+    generate_freq_vs_time_plots(archive_path, output_freqtime_dir)
     print(f"Frequency-vs-time images written to: {output_freqtime_dir}")
 
 

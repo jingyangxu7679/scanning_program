@@ -11,11 +11,11 @@ This scanning program supports three different imaging workflows:
 Note: when the chip is illuminated by white light, the yellow region is the high-reflectivity chromium region, and the black region is the low-reflectivity soda-lime glass region.
 
 0. Open Kinesis on the computer and adjust positions to the following: X = 2.20 mm, Y = 2.20 mm, Z = 0.50 mm. Adjust x and y positions in small steps no bigger than 0.1 mm. Adjust z position in small steps no bigger than 0.01 mm.
-1. Open the white light source and flip up the beam splitter. Open ThorCam on the computer to see the white light image.
+1. Open the white light source and flip up the beam splitter. Open ThorCam on the computer to see the white light image. Adjust Z position to around 0.48 mm allows image to focus.
 2. Adjust the position of the chip to the desired scanning position. The start position should be at the top-right corner of the pattern you want to scan. To see all patterns on the chip, view `Desktop\2026_3_12_ucla_imaging_mask` (a GDS file). The same pattern can have different sizes — the size marking at the bottom of each pattern (e.g., "300 um") indicates its size.
 3. The note below applies only to focusing for EXA/FPGA imaging. To find the best start scan position for the 300 um UCLA letters: first go to the top-right corner and adjust the chip position so the visual image shows half yellow region, half black region. Carefully move the chip to the right until it is completely in the high-reflectivity region, while maintaining the chip's y position during this move — this is important for being able to scan the entire image. Results from scanning from this optimal position versus a lower position are shown below.
 4. Make sure the pump laser driving the optomechanical device is on. If you haven't checked the EXA spectrum in several days, check it to ensure the optomechanical device is still at resonance.
-5. After moving the chip, put the beam splitter down. Connect the optical fiber extending from the collimator to the power meter. Make sure the power meter is examining wavelength at around 1060 nm.
+5. After moving the chip, put the beam splitter down. Adjust Z position back to 0.5 mm.Connect the optical fiber extending from the collimator to the power meter. Make sure the power meter is examining wavelength at around 1060 nm.
 6. Open the 1064 nm laser.
 7. Check the power reading on the power meter. If it is around 15 microwatts, the optical system is aligned (power above 10 microwatts also works). Calibrate optics if needed.
 8. Reconnect the optical fiber to the fiber connecting to the vacuum chamber.

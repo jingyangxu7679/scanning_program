@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-FPGA_LOG_DIR = Path.home() / "Desktop" / "FPGA_scan_data" / "08_22_test5_frames_476"
+FPGA_LOG_DIR = Path.home() / "Desktop" / "FPGA_scan_data" / "08_22_test6_frames_476"
 DEFAULT_ARCHIVE_PATH = FPGA_LOG_DIR / "scan_data.npz"
 DEFAULT_OUTPUT_GRAPH_DIR = FPGA_LOG_DIR / "Grid_graphs"
 DEFAULT_OUTPUT_FREQTIME_DIR = FPGA_LOG_DIR / "frequencyVStime"

@@ -31,7 +31,10 @@ import io
 import zipfile
 import serial, struct, time, csv
 import numpy as np
-ser = serial.Serial('COM3', 1_000_000, timeout=1.0)
+from pathlib import Path
+import create_grid_file_realtime_FPGA as rtfpga
+
+ser = None  # Opened lazily in main() so a spawned realtime-display subprocess doesn't try to reopen COM3.
 
 def crc16(d, c=0xFFFF):
     for b in d:
@@ -95,9 +98,14 @@ initial_z_focus=3852
 
 
 # FPGA_PLOT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fpga", "plot_multi_timed.py")
-FPGA_LOG_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "FPGA_scan_data", "08_22_test5_frames_476")
+FPGA_LOG_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "FPGA_scan_data", "08_22_test7_frames_476")
 os.makedirs(FPGA_LOG_DIR, exist_ok=True)
 FPGA_SCAN_ARCHIVE_PATH = os.path.join(FPGA_LOG_DIR, "scan_data.npz")
+
+# Set to False to skip the live grid display. It runs in its own process (see
+# rtfpga.launch_realtime_display()), so leaving it on does not slow down this
+# process's motor moves or FPGA acquisition.
+ENABLE_REALTIME_DISPLAY = True
 
 
 
@@ -140,7 +148,9 @@ def main():
 
     # Comment out this line for the real device
     #SimulationManager.Instance.InitializeSimulations()
+    global ser
     try:
+        ser = serial.Serial('COM3', 1_000_000, timeout=1.0)
         DeviceManagerCLI.BuildDeviceList()
 
         # create new device
@@ -238,10 +248,24 @@ def main():
         initial_pos_Z = channel_3.DevicePosition
         #time.sleep(1)
         #z_focus_counter=0
+
+        # Grid dimensions must match the scan loop below: M in range(41) with
+        # y_step_size -> 41 y positions; N in range(121) with step_size -> 121 x
+        # positions. The live display runs in its own process (see
+        # create_grid_file_realtime_FPGA.py) so it can't slow down motor moves
+        # or FPGA acquisition in this process.
+        # ---------------------------------------------------------------------------------
+        y_steps=41
+        x_steps=121
+        # ---------------------------------------------------------------------------------
+        x_positions = rtfpga.generate_positions(x_start_pos, x_start_pos + step_size * (x_steps-1), step_size)
+        y_positions = rtfpga.generate_positions(y_start_pos, y_start_pos + y_step_size * (y_steps-1), y_step_size)
+        display = rtfpga.launch_realtime_display(x_positions, y_positions) if ENABLE_REALTIME_DISPLAY else None
+
         # Kept open for the whole scan so every pixel is appended without reopening the file.
         scan_archive = zipfile.ZipFile(FPGA_SCAN_ARCHIVE_PATH, mode='w', compression=zipfile.ZIP_STORED, allowZip64=True)
         try:
-            for M in range(41):#41
+            for M in range(y_steps):#41
                 t_row_start = time.time()
                 print("Moving channel 2...")
                 t0 = time.time()
@@ -253,7 +277,7 @@ def main():
                 # the stage moves directly from the end of one row to the start of the
                 # next, instead of always jumping all the way back to x_start_pos - this
                 # avoids the large backlash-prone reset jump at the start of every row.
-                x_indices = range(121) if M % 2 == 0 else range(120, -1, -1)#121
+                x_indices = range(x_steps) if M % 2 == 0 else range(x_steps-1, -1, -1)#121
                 for N in x_indices:#121
                     t_pixel_start = time.time()
                     t0 = time.time()
@@ -293,6 +317,12 @@ def main():
                     t0 = time.time()
                     save_pixel_to_archive(scan_archive, frames, x_pos_f, y_pos_f)
                     print(f"  save_pixel_to_archive took {time.time()-t0:.4f}s")
+
+                    if display is not None and frames.size:
+                        try:
+                            display.update(x_pos_f, y_pos_f, rtfpga.compute_realtime_value(frames))
+                        except Exception as exc:
+                            print(f"[realtime display] {exc}")
                     # subprocess.run(
                     #     ["py", "-3.13", FPGA_PLOT_SCRIPT, "--peaks", "1", "--window", "4000", "--log", fpga_log_path],
                     #     check=True,
@@ -310,6 +340,11 @@ def main():
         finally:
             scan_archive.close()
             ser.close()
+            if display is not None:
+                grid_csv_path = Path(FPGA_LOG_DIR) / "realtime_grid_fpga.csv"
+                grid_png_path = Path(FPGA_LOG_DIR) / "realtime_grid_fpga.png"
+                display.save(grid_csv_path, grid_png_path)
+                display.close()
         #Home after moving 
         #channel.Home(60000)
         #channel_2.Home(60000)

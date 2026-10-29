@@ -1,0 +1,398 @@
+HOW THE COMPUTER-VISION AUTOFOCUS PROGRAM WORKS
+==============================================
+
+1. PURPOSE
+----------
+
+resolution_cv.py determines the Z position that produces the sharpest camera
+image at different X/Y positions.
+
+This is useful when the sample is tilted or curved. A fixed Z position may
+produce a sharp image in one part of the sample but a blurred image elsewhere.
+The program measures how the best-focus height changes across the sample and
+produces a mathematical function:
+
+    Z = f(X, Y)
+
+A scanning program can then use this function to adjust Z as X and Y move.
+
+The program has two main stages:
+
+1. Autofocus: measure the best Z at individual X/Y positions.
+2. Surface fitting: combine those measurements into a focus-height model for
+   the entire scan area.
+
+It uses conventional image processing and numerical fitting, not a trained
+AI model.
+
+
+2. CONNECTING TO THE HARDWARE
+----------------------------
+
+The program connects to two devices:
+
+- ThorCam camera: supplies white-light images through the Thorlabs camera SDK.
+- Three-axis motor controller: moves X, Y and Z through the existing
+  motor-control module.
+
+The channel assignments are:
+
+- Channel 1: X
+- Channel 2: Y
+- Channel 3: Z
+
+The camera and stage should not be controlled simultaneously by another
+application. Close competing camera and motor-control programs before
+connecting.
+
+Important coordinate requirement: the focus map uses the numerical coordinates
+supplied by the motor controller. Those coordinates depend on the configured
+stage model. Any program using the resulting map must use the same coordinate
+system or explicitly convert between coordinate systems.
+
+
+3. ACQUIRING IMAGES
+-------------------
+
+The camera runs continuously. Before measuring focus, the program discards
+buffered images and uses frame counts, frame timing and an additional timing
+margin to select a sufficiently recent image.
+
+This is intended to prevent an image captured before the stage settled from
+being assigned to the new Z position.
+
+For a colour Bayer camera, each 2x2 block of sensor pixels is averaged into one
+grayscale pixel. This reduces the colour-mosaic pattern that could otherwise
+be mistaken for fine image detail.
+
+If multiple frames are requested, the program averages them before calculating
+the focus score. Averaging reduces random noise but increases acquisition time.
+
+
+4. SELECTING THE IMAGE REGION TO ANALYSE
+--------------------------------------
+
+The user can drag a rectangle on the camera display to define a region of
+interest, or ROI.
+
+Only that region contributes to the focus score. Without an ROI, the program
+uses the full image.
+
+A useful ROI contains features such as:
+
+- Particle boundaries.
+- Surface texture.
+- Printed or patterned structures.
+- Clearly visible edges.
+
+A blank region provides little focus information. A region dominated by glare
+or saturated pixels can also produce unreliable results.
+
+The ROI stays at the same image-pixel location while the stage moves. It does
+not automatically track a particular particle or feature.
+
+
+5. CONVERTING AN IMAGE INTO A FOCUS SCORE
+---------------------------------------
+
+The program cannot directly determine the correct Z from one ordinary image.
+Instead, it calculates a sharpness score and compares scores from images taken
+at different Z positions.
+
+Before calculating the score, it applies light Gaussian smoothing to suppress
+pixel noise.
+
+Four metrics are available:
+
+Laplacian
+    Measures the variance of the image's second spatial derivative. Fine edges
+    and sharp texture produce strong responses. Blur reduces those responses.
+
+Tenengrad
+    Measures the average squared intensity gradient using Sobel filters. Sharp
+    edges have steeper intensity changes and therefore higher scores.
+
+Brenner
+    Measures the squared difference between pixels separated by two pixels
+    horizontally. It is a simple measure of local detail, but its response
+    depends on feature orientation.
+
+Normalised variance, or normvar
+    Measures the variation in pixel intensity relative to the average
+    brightness. It measures overall contrast rather than specifically fine
+    edges, so large shadows or illumination patterns can influence it.
+
+All four scores are divided by the square of the mean image intensity and
+multiplied by a fixed scale factor. This reduces sensitivity to uniform
+brightness changes, but does not eliminate the effects of noise, saturation
+or changing illumination patterns.
+
+Higher scores indicate sharper images according to the selected metric.
+Scores from different metrics are not directly comparable.
+
+
+6. FINDING BEST FOCUS AT ONE X/Y POSITION
+---------------------------------------
+
+At a fixed X/Y position, the program searches along Z.
+
+6.1 Coarse search
+
+The search begins around a starting estimate, called the Z guess.
+
+The program:
+
+1. Moves to a series of Z positions around that guess.
+2. Waits for the configured settling time after each move.
+3. Acquires and averages camera frames.
+4. Calculates the focus score.
+5. Records the actual Z and its score.
+
+This produces a focus-score-versus-Z curve.
+
+If the highest score occurs at either end of the coarse sweep, the program
+shifts the search farther in that direction. This can repeat up to three
+times, subject to the Z safety window.
+
+The goal is to find a peak with measurements on both sides.
+
+6.2 Fine search
+
+Once the coarse search brackets a peak, the program makes another sweep around
+the best coarse position using smaller Z steps.
+
+This measures the peak more closely without requiring tiny steps across the
+entire original search range.
+
+6.3 Estimating the peak between measured positions
+
+The true best-focus position may lie between two measured Z positions.
+
+The program takes up to five samples around the highest fine-search score and
+fits a quadratic curve to the logarithm of the scores:
+
+    log(score) approximately equals a*Z^2 + b*Z + c
+
+For a downward-opening curve, the estimated peak is:
+
+    Z_best = -b / (2*a)
+
+The estimate is accepted only if it lies within the fitted sample interval.
+Otherwise, the program falls back to a weighted average of nearby peak samples.
+
+This provides a sub-step estimate, but it does not guarantee sub-step physical
+accuracy. Accuracy still depends on image quality, stage repeatability and
+the shape of the focus curve.
+
+6.4 Moving to the result
+
+On success, the stage moves to the estimated best-focus Z.
+
+Each sweep and final positioning move approaches Z from below where the
+safety window permits. Using a consistent approach direction helps reduce
+backlash-related differences.
+
+For handled failures such as insufficient focus contrast or an unbracketed
+peak, the program attempts to return Z to the starting guess. A user stop or
+hardware exception does not guarantee that return move.
+
+
+7. CHECKING AUTOFOCUS QUALITY
+----------------------------
+
+The program evaluates whether the focus score changed sufficiently during
+the search:
+
+    Focus-curve contrast =
+        (maximum score - minimum score) / maximum score
+
+A very low value suggests that the images did not provide a useful focus
+signal. Possible causes include a blank ROI, inadequate sampling or
+insufficient focus variation.
+
+The program also measures the fraction of pixels near the camera's maximum
+intensity. If more than 1% are near saturation, it reports a warning to lower
+exposure. Saturation alone does not automatically reject the point.
+
+These checks help identify poor measurements, but they do not prove that the
+selected peak corresponds to the desired sample surface. Multiple layers or
+reflections can produce competing peaks.
+
+
+8. BUILDING A FOCUS MAP ACROSS X AND Y
+------------------------------------
+
+The user defines:
+
+- X start and stop.
+- Y start and stop.
+- Number of X samples.
+- Number of Y samples.
+
+For example, five X samples and six Y samples produce 30 autofocus locations.
+
+Before focusing begins, the program moves X and Y back to the specified start
+coordinates and reads their positions back. If either axis differs from its
+target by more than 0.001 controller units, the map stops with an error.
+
+It then visits the grid in a serpentine pattern: one row moves left to right,
+the next right to left.
+
+At every grid point, it:
+
+1. Moves X and Y.
+2. Estimates a suitable starting Z.
+3. Performs the coarse and fine autofocus searches.
+4. Records the result.
+5. Updates the plots and progress display.
+6. Writes the result to the CSV file.
+
+Initially, the Z estimate comes from the starting height or the most recent
+successful result. Once enough successful points span both X and Y, an
+interim plane fit predicts the next starting height.
+
+This prediction helps the search start closer to focus; it does not replace
+autofocus at that point.
+
+
+9. FITTING THE FOCUS SURFACE
+---------------------------
+
+After collecting measurements, the program fits a surface through the
+successful best-focus positions.
+
+Order 0: constant height
+
+    Z = c
+
+Useful when the surface is approximately level.
+
+Order 1: tilted plane
+
+    Z = c + a*(X - Xc) + b*(Y - Yc)
+
+Here:
+
+- c is the predicted focus height at the model's centre.
+- a is the Z change per unit X.
+- b is the Z change per unit Y.
+- Xc and Yc are reference coordinates used to centre the calculation.
+
+This is suitable for a mostly flat but tilted sample.
+
+Order 2: curved surface
+
+    Z = c + a*U + b*V + d*U^2 + e*U*V + f*V^2
+
+where:
+
+    U = X - Xc
+    V = Y - Yc
+
+The additional terms represent curvature and coupled X/Y variation.
+
+A quadratic requires at least six suitably distributed measurements. More
+measurements generally provide a better basis for checking the fit.
+
+Outlier rejection
+
+The program fits by least squares and examines the difference between each
+measured Z and the predicted surface.
+
+It iteratively rejects unusually large residuals using a robust spread
+estimate called the median absolute deviation, or MAD, together with a
+minimum residual threshold of 0.002 controller units.
+
+The reported RMS value describes how closely the retained measurements follow
+the fitted surface. It is not a direct measurement of optical resolution or
+absolute focusing accuracy.
+
+
+10. GENERATING THE Z CORRECTION FORMULA
+--------------------------------------
+
+The program converts the fitted surface into a text expression that another
+scanning program can evaluate.
+
+There are two output modes.
+
+Absolute mode
+
+    Z = f(X, Y)
+
+Uses the measured focus heights directly. This requires the same coordinate
+reference and compatible units as the mapping run.
+
+Anchored mode
+
+    Z = Z_start + f(X, Y) - f(X_start, Y_start)
+
+Uses the map's tilt and curvature but shifts its overall height to the scan's
+starting Z.
+
+Anchored mode requires the starting position to be correctly focused. It
+compensates for a height offset; it does not correct a change in stage scale,
+sample tilt or sample shape.
+
+
+11. DISPLAY AND SAVED RESULTS
+----------------------------
+
+The interface shows:
+
+- A live grayscale camera image.
+- The focus-score-versus-Z measurements.
+- The measured focus locations and fitted surface.
+- Current position, progress and status messages.
+- The generated Z expression.
+
+The program writes a CSV containing each point's coordinates, best Z, focus
+score, success status, warnings and measured focus curve. It also attempts
+to save a PNG summary after mapping.
+
+The expression can be copied or saved separately as a text file.
+
+
+12. WHAT HAPPENS DURING THE LATER SCAN
+------------------------------------
+
+The normal workflow separates calibration from scanning:
+
+1. Use the camera to measure a focus map.
+2. Fit and export the Z function.
+3. Have the scanning program calculate Z from that function at its scan
+   coordinates.
+
+The resulting scan is model-based focus compensation, not continuous
+camera-feedback autofocus. It does not automatically detect later drift or
+changes in the sample.
+
+The file includes a small three-position refocusing helper, but the normal
+map-export workflow does not automatically run it during a separate scan.
+
+
+13. IMPORTANT LIMITATIONS
+------------------------
+
+- The program measures image sharpness, not calibrated optical resolution in
+  micrometres or line pairs per millimetre.
+- A single blurred image does not reliably indicate whether Z should move up
+  or down; that is why the program performs a Z sweep.
+- Predictions are most reliable inside the measured X/Y region. Outside it,
+  the surface is extrapolated.
+- A focus map can become invalid if the sample moves, optics change or
+  controller coordinates change.
+- Controller settings determine position units. Physical-distance conversions
+  must be verified rather than inferred from the GUI labels.
+- The Z window is a software travel restriction, not collision detection.
+- The Stop button requests cancellation at software checkpoints; it is not an
+  immediate hardware emergency stop.
+
+
+SUMMARY
+-------
+
+The program moves through a grid of X/Y positions, searches Z for the sharpest
+camera image at each location, and fits a mathematical surface through the
+measured best-focus heights. That surface allows a later scanning program to
+predict and apply the required Z correction throughout the scan area.

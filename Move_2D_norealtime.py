@@ -5,6 +5,8 @@ Example Date of Last Modification on Github: 2024-04-19
 Version of Python used for Testing: 3.9
 ==================
 Example Description: This example controls the BSC200 series (Using the HDR50/M stage)
+Scan move completions are timestamped in the console and a .txt log in Desktop/scan_timebudget;
+the existing per-point CSV output is retained.
 """
 
 #edited from this example: https://github.com/Thorlabs/Motion_Control_Examples/blob/main/Python/Kinesis/Benchtop/BSC20X/BSC20X_pythonnet.py
@@ -42,10 +44,64 @@ initial_z_focus=3852
 CSV_DIRNAME = "CSV_single"
 GRAPH_DIRNAME = "GRAPH_single"
 
+# ThorCam focus map 2026-10-28 15:01 (resolution_cv.py): plane (tilt) fit, 26 points, rms 0.00191
+# z_focus(x, y) = Z0 + DZ_DX * (x - XC) + DZ_DY * (y - YC)
+# The map was measured through basic_motor_control.py (Motor_GUI / resolution_cv.py), which loads the
+# "HDR50/M" stage settings (75093 controller steps per unit). This script loads "HS NanoMax 300 ... (DRV208)"
+# (819200 steps per unit, same as the Kinesis GUI), so the same physical position reads differently, e.g. raw Z
+# counter 168535 = 2.24434 there but 0.205731 here. Positions (Z0, XC, YC, x, y) are converted with
+# FOCUS_MAP_UNIT_SCALE; the slopes are dimensionless (x, y and z scale equally) and need no conversion.
+# Paste future resolution_cv.py fit numbers below unchanged (in HDR50/M units).
+FOCUS_MAP_Z0 = 2.2864687
+FOCUS_MAP_DZ_DX = 0.04563134
+FOCUS_MAP_DZ_DY = 0.024761352
+FOCUS_MAP_XC = 1.102565
+FOCUS_MAP_YC = 0.269231
+MAP_STEPS_PER_UNIT = 75093.0      # HDR50/M settings used by basic_motor_control.py
+STAGE_STEPS_PER_UNIT = 819200.0   # HS NanoMax 300 (DRV208) settings used in main() below
+FOCUS_MAP_UNIT_SCALE = MAP_STEPS_PER_UNIT / STAGE_STEPS_PER_UNIT  # map units -> this script's units
+# False: move z to the absolute best-focus z measured by the focus map.
+# True: use only the map's tilt, anchored to the z the scan starts at: z0 + f(x, y) - f(x0, y0).
+FOCUS_MAP_ANCHOR_TO_START = False
+# Focus-map targets are not restricted by their distance from the starting Z.
+
+
+def log_position_change(log_file, axis, target, channels, tz):
+    """Record the position readbacks immediately after a blocking move completes."""
+    timestamp = datetime.now(tz).isoformat(timespec="milliseconds")
+    positions = ", ".join(f"{name}={channel.DevicePosition}" for name, channel in channels)
+    line = f"[{timestamp}] {axis} move completed: target={target}; {positions}"
+    print(line, flush=True)
+    log_file.write(line + "\n")
+    log_file.flush()
+
+
+def focus_map_z(x, y):
+    # x, y and the returned z are in this script's (NanoMax) units
+    s = FOCUS_MAP_UNIT_SCALE
+    return (FOCUS_MAP_Z0 * s
+            + FOCUS_MAP_DZ_DX * (x - FOCUS_MAP_XC * s)
+            + FOCUS_MAP_DZ_DY * (y - FOCUS_MAP_YC * s))
 
 
 def shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z):
-    # this function shifts the z axis of 3-axis motorized stage based on pre computed spatial variation of necessary z-focus
+    # this function shifts the z axis of 3-axis motorized stage based on the ThorCam focus map plane fit
+    x_pos_float = float(str(x_pos))
+    y_pos_float = float(str(y_pos))
+    z_start_float = float(str(initial_pos_Z))
+    if FOCUS_MAP_ANCHOR_TO_START:
+        x_start_float = float(str(initial_pos_X))
+        y_start_float = float(str(initial_pos_Y))
+        new_z_float = z_start_float + focus_map_z(x_pos_float, y_pos_float) - focus_map_z(x_start_float, y_start_float)
+    else:
+        new_z_float = focus_map_z(x_pos_float, y_pos_float)
+    new_z_pos = Decimal(round(new_z_float, 6))
+    print(f"Shifting z focus stage to new position: {new_z_pos}")
+    return new_z_pos
+
+
+def shift_zfocus_stage_manual(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z):
+    # previous hand-tuned piecewise z correction (kept for reference; not used)
     x_pos_float = float(str(x_pos))
     y_pos_float = float(str(y_pos))
     z_start_float = float(str(initial_pos_Z))
@@ -175,6 +231,9 @@ def main():
         run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         csv_filename = f"motor_pos_time_{run_timestamp}.csv"
         csv_path = os.path.join(output_dir, csv_filename)
+        log_dir = os.path.join(os.path.expanduser("~"), "Desktop", "scan_timebudget")
+        os.makedirs(log_dir, exist_ok=True)
+        txt_path = os.path.join(log_dir, f"motor_pos_time_{run_timestamp}.txt")
 
         tz_minus_7 = timezone(timedelta(hours=-7))
 
@@ -192,10 +251,18 @@ def main():
         initial_pos_Z = channel_3.DevicePosition
         #time.sleep(1)
         #z_focus_counter=0
+        txt_file = None
         try:
-            for M in range(11):#41
+            txt_file = open(txt_path, "w", encoding="utf-8")
+            txt_file.write("Move completion timestamps (UTC -07:00); positions in configured stage units.\n")
+            txt_file.flush()
+            print(f"Saving move timestamps to: {txt_path}")
+            scan_channels = (("X", channel), ("Y", channel_2), ("Z", channel_3))
+            for M in range(41):#41
                 print("Moving channel 2...")
-                channel_2.MoveTo(Decimal(y_start_pos + y_step_size*M), 60000)
+                y_target = Decimal(y_start_pos + y_step_size*M)
+                channel_2.MoveTo(y_target, 60000)
+                log_position_change(txt_file, "Y", y_target, scan_channels, tz_minus_7)
                 #time.sleep(1)
                 print(f"Channel 2 position changed. Position = {channel_2.DevicePosition}")
 
@@ -203,9 +270,11 @@ def main():
                 # the stage moves directly from the end of one row to the start of the
                 # next, instead of always jumping all the way back to x_start_pos - this
                 # avoids the large backlash-prone reset jump at the start of every row.
-                x_indices = range(21) if M % 2 == 0 else range(20, -1, -1)
+                x_indices = range(121) if M % 2 == 0 else range(120, -1, -1)
                 for N in x_indices:#41
-                    channel.MoveTo(Decimal(x_start_pos + step_size*N), 60000)
+                    x_target = Decimal(x_start_pos + step_size*N)
+                    channel.MoveTo(x_target, 60000)
+                    log_position_change(txt_file, "X", x_target, scan_channels, tz_minus_7)
                     print(f"Channel 1 position changed. Position = {channel.DevicePosition}")
                     #time.sleep(1)
                     x_pos = channel.DevicePosition
@@ -219,10 +288,11 @@ def main():
                         z_focus_pos=shift_zfocus_stage(x_pos, y_pos, initial_pos_X, initial_pos_Y, initial_pos_Z) 
                     
                         channel_3.MoveTo(z_focus_pos, 60000)
+                        log_position_change(txt_file, "Z", z_focus_pos, scan_channels, tz_minus_7)
                         z_actual = channel_3.DevicePosition
                         z_error = float(str(z_actual)) - float(str(z_focus_pos))
                         print(f"Z command: {z_focus_pos}, Z actual: {z_actual}, Z error: {z_error}")
-                    time.sleep(1)
+                    #time.sleep(1)
                     # Convert .NET Decimal device positions to plain Python floats up front -
                     # picoscope_block_mode_run's filename/attribute formatting (e.g. f"{value:.3f}")
                     # raises a TypeError on a raw System.Decimal.
@@ -243,6 +313,8 @@ def main():
                 #time.sleep(1)
                 N=N+1
         finally:
+            if txt_file is not None:
+                txt_file.close()
             csv_file.close()
 
         #Home after moving 

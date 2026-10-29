@@ -45,7 +45,7 @@ def crc16(d, c=0xFFFF):
 
 BINHZ = 244_138_308 / 128000.0
 
-FRAMES_PER_PIXEL = 476        # 0.25 s worth at 1907 frames/s
+FRAMES_PER_PIXEL = 100        # 0.25 s worth at 1907 frames/s
 
 FRAME_DTYPE = np.dtype([
     ('timestamp', 'f8'),
@@ -98,14 +98,14 @@ initial_z_focus=3852
 
 
 # FPGA_PLOT_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fpga", "plot_multi_timed.py")
-FPGA_LOG_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "FPGA_scan_data", "08_22_test7_frames_476")
+FPGA_LOG_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "FPGA_scan_data", "08_31_test2_frames_100")
 os.makedirs(FPGA_LOG_DIR, exist_ok=True)
 FPGA_SCAN_ARCHIVE_PATH = os.path.join(FPGA_LOG_DIR, "scan_data.npz")
 
 # Set to False to skip the live grid display. It runs in its own process (see
 # rtfpga.launch_realtime_display()), so leaving it on does not slow down this
 # process's motor moves or FPGA acquisition.
-ENABLE_REALTIME_DISPLAY = True
+ENABLE_REALTIME_DISPLAY = False
 
 
 
@@ -312,12 +312,13 @@ def main():
                     # Capture data via the FPGA multi-peak readout and append it (with its
                     # position) to the single scan-wide archive instead of one CSV per pixel.
                     t0 = time.time()
-                    frames = log_pixel(476) #about 0.25s
+                    frames = log_pixel(FRAMES_PER_PIXEL) #about 0.25s
                     print(f"  log_pixel took {time.time()-t0:.4f}s")
                     t0 = time.time()
                     save_pixel_to_archive(scan_archive, frames, x_pos_f, y_pos_f)
                     print(f"  save_pixel_to_archive took {time.time()-t0:.4f}s")
-
+                    
+                    t0 = time.time()
                     if display is not None and frames.size:
                         try:
                             display.update(x_pos_f, y_pos_f, rtfpga.compute_realtime_value(frames))
@@ -327,6 +328,7 @@ def main():
                     #     ["py", "-3.13", FPGA_PLOT_SCRIPT, "--peaks", "1", "--window", "4000", "--log", fpga_log_path],
                     #     check=True,
                     # )
+                    print(f"  display update took {time.time()-t0:.4f}s")
 
                     #time.sleep(1)
 
